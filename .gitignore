@@ -1,0 +1,28 @@
+# node packages
+node_modules/
+
+# build binaries
+artifacts/
+artifacts-zk/
+artifacts-normal/
+
+cache/
+cache-zk/
+cache-normal/
+
+bin/
+
+# ide files
+.vscode/
+
+# secrets
+secrets.json
+
+# logs
+yarn-error.log
+
+# workspace
+misc/
+deploy/
+deploy-zksync.sh
+contracts/test/
