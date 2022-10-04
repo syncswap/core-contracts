@@ -9,11 +9,12 @@ library TransferHelper {
         address to,
         uint256 value
     ) internal {
-        // bytes4(keccak256(bytes('approve(address,uint256)')));
+        // bytes4(keccak256(bytes("approve(address,uint256)")));
+        // solhint-disable-next-line avoid-low-level-calls
         (bool success, bytes memory data) = token.call(abi.encodeWithSelector(0x095ea7b3, to, value));
         require(
             success && (data.length == 0 || abi.decode(data, (bool))),
-            'Y'
+            "Y"
         );
     }
 
@@ -22,11 +23,12 @@ library TransferHelper {
         address to,
         uint256 value
     ) internal {
-        // bytes4(keccak256(bytes('transfer(address,uint256)')));
+        // bytes4(keccak256(bytes("transfer(address,uint256)")));
+        // solhint-disable-next-line avoid-low-level-calls
         (bool success, bytes memory data) = token.call(abi.encodeWithSelector(0xa9059cbb, to, value));
         require(
             success && (data.length == 0 || abi.decode(data, (bool))),
-            'T'
+            "T"
         );
     }
 
@@ -36,16 +38,18 @@ library TransferHelper {
         address to,
         uint256 value
     ) internal {
-        // bytes4(keccak256(bytes('transferFrom(address,address,uint256)')));
+        // bytes4(keccak256(bytes("transferFrom(address,address,uint256)")));
+        // solhint-disable-next-line avoid-low-level-calls
         (bool success, bytes memory data) = token.call(abi.encodeWithSelector(0x23b872dd, from, to, value));
         require(
             success && (data.length == 0 || abi.decode(data, (bool))),
-            'W'
+            "W"
         );
     }
 
     function safeTransferETH(address to, uint256 value) internal {
+        // solhint-disable-next-line avoid-low-level-calls
         (bool success, ) = to.call{value: value}(new bytes(0));
-        require(success, 'C');
+        require(success, "C");
     }
 }

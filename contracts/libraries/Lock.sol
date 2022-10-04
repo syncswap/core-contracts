@@ -7,7 +7,7 @@ abstract contract Lock {
     uint8 private unlocked = 1;
     
     modifier lock() {
-        require(unlocked == 1);
+        require(unlocked == 1, "Locked");
         unlocked = 0;
         _;
         unlocked = 1;

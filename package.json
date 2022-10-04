@@ -16,6 +16,7 @@
   "devDependencies": {
     "@matterlabs/hardhat-zksync-deploy": "^0.4.0",
     "@matterlabs/hardhat-zksync-solc": "^0.3.6",
+    "@nomiclabs/hardhat-solhint": "^2.0.1",
     "@types/chai": "^4.3.1",
     "@types/mocha": "^9.1.1",
     "chai": "^4.3.6",

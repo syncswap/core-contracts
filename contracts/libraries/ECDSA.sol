@@ -45,6 +45,7 @@ library ECDSA {
         // ecrecover takes the signature parameters, and the only way to get them
         // currently is to use assembly.
         /// @solidity memory-safe-assembly
+        // solhint-disable-next-line no-inline-assembly
         assembly {
             r := mload(add(signature, 0x20))
             s := mload(add(signature, 0x40))
@@ -65,5 +66,21 @@ library ECDSA {
         }
 
         return ecrecover(hash, v, r, s);
+    }
+
+    function toArraySignature(
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) internal pure returns (bytes memory) {
+        bytes memory signature = new bytes(65);
+        // solhint-disable-next-line no-inline-assembly
+        assembly {
+            mstore(add(signature, 32), r)
+            mstore(add(signature, 64), s)
+            mstore8(add(signature, 96), v)
+        }
+
+        return signature;
     }
 }

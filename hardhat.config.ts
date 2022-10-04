@@ -1,6 +1,7 @@
-require("@matterlabs/hardhat-zksync-deploy");
-require("@matterlabs/hardhat-zksync-solc");
-require("@nomiclabs/hardhat-waffle");
+import "@matterlabs/hardhat-zksync-deploy";
+import "@matterlabs/hardhat-zksync-solc";
+import "@nomiclabs/hardhat-waffle";
+import "@nomiclabs/hardhat-solhint";
 
 module.exports = {
   // hardhat-zksync-solc
@@ -24,9 +25,6 @@ module.exports = {
     version: "1.1.6",
     compilerSource: "docker",
     settings: {
-      optimizer: {
-        enabled: true,
-      },
       experimental: {
         dockerImage: "matterlabs/zksolc",
         tag: "v1.1.6"
