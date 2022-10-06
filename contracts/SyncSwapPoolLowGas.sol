@@ -48,14 +48,14 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
     uint private invariantLast;
 
     /// @dev Factory must ensures that the parameters are valid.
-    constructor(address _token0, address _token1, uint _a, uint _token0PrecisionMultiplier, uint _token1PrecisionMultiplier) {
+    constructor(address _token0, address _token1, uint _a, uint _token0PrecisionMultiplier, uint _token1PrecisionMultiplier) payable {
         factory = msg.sender;
         token0 = _token0;
         token1 = _token1;
         if (_a != 0) {
             stable = true;
             A = _a;
-            N_A = 2 * _a;
+            N_A = 2.mulUnsafeFirst(_a);
             token0PrecisionMultiplier = _token0PrecisionMultiplier;
             token1PrecisionMultiplier = _token1PrecisionMultiplier;
         }
@@ -112,8 +112,8 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
         (bool _feeOn, uint _totalSupply, ) = _mintProtocolFee(_balance0, _balance1);
 
         // Calculates amounts of pool tokens proportional to balances.
-        _amount0 = _liquidity * _balance0 / _totalSupply;
-        _amount1 = _liquidity * _balance1 / _totalSupply;
+        _amount0 = _liquidity.mulDiv(_balance0, _totalSupply);
+        _amount1 = _liquidity.mulDiv(_balance1, _totalSupply);
         //require(_amount0 != 0 || _amount1 != 0); // unchecked to save gas, should be done through router.
 
         // Burns liquidity and transfers pool tokens.
@@ -147,8 +147,8 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
         (bool _feeOn, uint _totalSupply, ) = _mintProtocolFee(_balance0, _balance1);
 
         // Calculates amounts of pool tokens proportional to balances.
-        uint _amount0 = _liquidity * _balance0 / _totalSupply;
-        uint _amount1 = _liquidity * _balance1 / _totalSupply;
+        uint _amount0 = _liquidity.mulDiv(_balance0, _totalSupply);
+        uint _amount1 = _liquidity.mulDiv(_balance1, _totalSupply);
 
         // Burns liquidity and, update last invariant using counterfactuals balances.
         _burn(address(this), _liquidity);
@@ -281,12 +281,22 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
         if (_reserve0 == 0 || _reserve1 == 0) {
             return (0, 0);
         }
-        uint _amount1Optimal = (_amount0 * _reserve1) / _reserve0;
+        //uint _amount1Optimal = (_amount0 * _reserve1) / _reserve0;
+        uint _amount1Optimal = _amount0.mulDiv(_reserve1, _reserve0);
         if (_amount1 >= _amount1Optimal) {
-            _token1Fee = (_getSwapFee() * (_amount1 - _amount1Optimal)) / (2 * MAX_FEE);
+            //_token1Fee = (_getSwapFee() * (_amount1 - _amount1Optimal)) / (2 * MAX_FEE);
+            _token1Fee = _getSwapFee().mulDivUnsafeLast(
+                (_amount1 - _amount1Optimal),
+                (2 * MAX_FEE)
+            );
         } else {
-            uint _amount0Optimal = (_amount1 * _reserve0) / _reserve1;
-            _token0Fee = (_getSwapFee() * (_amount0 - _amount0Optimal)) / (2 * MAX_FEE);
+            //uint _amount0Optimal = (_amount1 * _reserve0) / _reserve1;
+            uint _amount0Optimal = _amount1.mulDiv(_reserve0, _reserve1);
+            //_token0Fee = (_getSwapFee() * (_amount0 - _amount0Optimal)) / (2 * MAX_FEE);
+            _token1Fee = _getSwapFee().mulDivUnsafeLast(
+                (_amount0 - _amount0Optimal),
+                (2 * MAX_FEE)
+            );
         }
     }
 
@@ -303,9 +313,9 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
                 if (_invariant > _invariantLast) {
                     /// @dev Mints `protocolFee` % of growth in liquidity (invariant).
                     uint _protocolFee = ISyncSwapFactory(factory).protocolFee();
-                    uint _numerator = _totalSupply * (_invariant - _invariantLast) * _protocolFee;
-                    uint _denominator = (MAX_FEE - _protocolFee) * _invariant + _protocolFee * _invariantLast;
-                    uint _liquidity = _numerator / _denominator;
+                    uint _numerator = (_invariant - _invariantLast).mulUnsafeFirst(_totalSupply).mul(_protocolFee);
+                    uint _denominator = _invariant.mulUnsafeFirst(MAX_FEE - _protocolFee) + _invariantLast.mulUnsafeFirst(_protocolFee);
+                    uint _liquidity = _numerator.div(_denominator);
 
                     if (_liquidity != 0) {
                         _mint(_feeRecipient, _liquidity);
@@ -320,13 +330,11 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
     }
 
     function getAmountOut(address _tokenIn, uint _amountIn) external view override returns (uint _finalAmountOut) {
-        (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
-        _finalAmountOut = _getAmountOut(_amountIn, _reserve0, _reserve1, _tokenIn == token0);
+        _finalAmountOut = _getAmountOut(_amountIn, reserve0, reserve1, _tokenIn == token0);
     }
 
     function getAmountIn(address _tokenOut, uint256 _amountOut) external view override returns (uint _finalAmountIn) {
-        (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
-        _finalAmountIn = _getAmountIn(_amountOut, _reserve0, _reserve1, _tokenOut == token0);
+        _finalAmountIn = _getAmountIn(_amountOut, reserve0, reserve1, _tokenOut == token0);
     }
 
     function _getAmountOut(
@@ -337,29 +345,37 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
     ) private view returns (uint _dy) {
         if (stable) {
             unchecked {
-                uint _adjustedReserve0 = _reserve0 * token0PrecisionMultiplier;
-                uint _adjustedReserve1 = _reserve1 * token1PrecisionMultiplier;
-                uint _feeDeductedAmountIn = _amountIn - (_amountIn * _getSwapFee()) / MAX_FEE;
+                uint _adjustedReserve0 = token0PrecisionMultiplier.mulUnsafeFirst(_reserve0);
+                uint _adjustedReserve1 = token1PrecisionMultiplier.mulUnsafeFirst(_reserve1);
+                uint _feeDeductedAmountIn = _amountIn - _amountIn.mulDivUnsafeLast(_getSwapFee(), MAX_FEE);
                 uint _d = _computeDFromAdjustedBalances(_adjustedReserve0, _adjustedReserve1);
 
                 if (_token0In) {
-                    uint _x = _adjustedReserve0 + (_feeDeductedAmountIn * token0PrecisionMultiplier);
+                    uint _x = _adjustedReserve0 + (token0PrecisionMultiplier.mulUnsafeFirst(_feeDeductedAmountIn));
                     uint _y = _getY(_x, _d);
                     _dy = _adjustedReserve1 - _y - 1;
                     _dy /= token1PrecisionMultiplier;
                 } else {
-                    uint _x = _adjustedReserve1 + (_feeDeductedAmountIn * token1PrecisionMultiplier);
+                    uint _x = _adjustedReserve1 + (token1PrecisionMultiplier.mulUnsafeFirst(_feeDeductedAmountIn));
                     uint _y = _getY(_x, _d);
                     _dy = _adjustedReserve0 - _y - 1;
                     _dy /= token0PrecisionMultiplier;
                 }
             }
         } else {
-            uint _amountInWithFee = _amountIn * (MAX_FEE - _getSwapFee());
+            uint _amountInWithFee = _amountIn.mul(MAX_FEE - _getSwapFee());
             if (_token0In) {
-                _dy = (_amountInWithFee * _reserve1) / (_reserve0 * MAX_FEE + _amountInWithFee);
+                //_dy = (_amountInWithFee * _reserve1) / (_reserve0 * MAX_FEE + _amountInWithFee);
+                _dy = _amountInWithFee.mulDiv(
+                    _reserve1,
+                    (MAX_FEE.mulUnsafeFirst(_reserve0) + _amountInWithFee)
+                );
             } else {
-                _dy = (_amountInWithFee * _reserve0) / (_reserve1 * MAX_FEE + _amountInWithFee);
+                //_dy = (_amountInWithFee * _reserve0) / (_reserve1 * MAX_FEE + _amountInWithFee);
+                _dy = _amountInWithFee.mulDiv(
+                    _reserve0,
+                    (MAX_FEE.mulUnsafeFirst(_reserve1) + _amountInWithFee)
+                );
             }
         }
     }
@@ -372,8 +388,8 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
     ) private view returns (uint _dx) {
         if (stable) {
             unchecked {
-                uint _adjustedReserve0 = _reserve0 * token0PrecisionMultiplier;
-                uint _adjustedReserve1 = _reserve1 * token1PrecisionMultiplier;
+                uint _adjustedReserve0 = token0PrecisionMultiplier.mulUnsafeFirst(_reserve0);
+                uint _adjustedReserve1 = token1PrecisionMultiplier.mulUnsafeFirst(_reserve1);
                 uint _d = _computeDFromAdjustedBalances(_adjustedReserve0, _adjustedReserve1);
 
                 if (_token0Out) {
@@ -382,23 +398,41 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
                         return 1;
                     }
                     uint _x = _getY(_y, _d);
-                    _dx = MAX_FEE * (_x - _adjustedReserve1) / (MAX_FEE - _getSwapFee()) + 1;
-                    _dx /= token1PrecisionMultiplier;
+                    //_dx = MAX_FEE.mulUnsafeFirst(_x - _adjustedReserve1).divUnsafeLast((MAX_FEE - _getSwapFee()) + 1);
+                    /// @dev It's safe here because both `MAX_FEE` and `(MAX_FEE - _getSwapFee()) + 1` will never be zero.
+                    _dx = MAX_FEE.mulDivUnsafeBoth(
+                        _x - _adjustedReserve1,
+                        (MAX_FEE - _getSwapFee()) + 1
+                    );
+                    _dx = _dx.divUnsafeLast(token1PrecisionMultiplier);
                 } else {
                     uint _y = _adjustedReserve1 - _amountOut;
                     if (_y <= 1) {
                         return 1;
                     }
                     uint _x = _getY(_y, _d);
-                    _dx = MAX_FEE * (_x - _adjustedReserve0) / (MAX_FEE - _getSwapFee()) + 1;
-                    _dx /= token0PrecisionMultiplier;
+                    //_dx = MAX_FEE.mulUnsafeFirst(_x - _adjustedReserve0).divUnsafeLast((MAX_FEE - _getSwapFee()) + 1);
+                    /// @dev It's safe here because both `MAX_FEE` and `(MAX_FEE - _getSwapFee()) + 1` will never be zero.
+                    _dx = MAX_FEE.mulDivUnsafeBoth(
+                        _x - _adjustedReserve0,
+                        (MAX_FEE - _getSwapFee()) + 1
+                    );
+                    _dx = _dx.divUnsafeLast(token0PrecisionMultiplier);
                 }
             }
         } else {
             if (_token0Out) {
-                _dx = (_reserve1 * _amountOut * MAX_FEE) / ((_reserve0 - _amountOut) * (MAX_FEE - _getSwapFee())) + 1;
+                //_dx = (_reserve1 * _amountOut * MAX_FEE) / ((_reserve0 - _amountOut) * (MAX_FEE - _getSwapFee())) + 1;
+                _dx = MAX_FEE.mulDivUnsafeFirst(
+                    _reserve1.mul(_amountOut),
+                    ((_reserve0 - _amountOut).mul(MAX_FEE - _getSwapFee()))
+                ) + 1;
             } else {
-                _dx = (_reserve0 * _amountOut * MAX_FEE) / ((_reserve1 - _amountOut) * (MAX_FEE - _getSwapFee())) + 1;
+                //_dx = (_reserve0 * _amountOut * MAX_FEE) / ((_reserve1 - _amountOut) * (MAX_FEE - _getSwapFee())) + 1;
+                _dx = MAX_FEE.mulDivUnsafeFirst(
+                    _reserve0.mul(_amountOut),
+                    ((_reserve1 - _amountOut).mul(MAX_FEE - _getSwapFee()))
+                ) + 1;
             }
         }
     }
@@ -408,19 +442,23 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
     /// This function is used as a helper function to calculate how much TO token
     /// the user should receive on swap.
     /// @dev Originally https://github.com/saddle-finance/saddle-contract/blob/0b76f7fb519e34b878aa1d58cffc8d8dc0572c12/contracts/SwapUtils.sol#L432.
-    /// @param x The new total amount of FROM token.
+    /// @param _x The new total amount of FROM token.
     /// @return y The amount of TO token that should remain in the pool.
-    function _getY(uint x, uint _d) private view returns (uint y) {
-        uint c = (_d * _d) / (x * 2);
-        c = (c * _d) / (N_A * 2);
-        uint b = x + (_d / N_A);
-        uint yPrev;
-        y = _d;
+    function _getY(uint _x, uint _d) private view returns (uint _y) {
+        //uint _c = (_d * _d) / 2.mulUnsafeFirst(_x);
+        uint _c = _d.mulDiv(_d, 2.mulUnsafeFirst(_x));
+        //_c = (_c * _d) / 2.mulUnsafeFirst(N_A);
+        _c = _c.mulDiv(_d, 2.mulUnsafeFirst(N_A));
+        //uint _b = _x + (_d / N_A);
+        uint _b = _x + _d.divUnsafeLast(N_A); /// @dev N_A will never be zero.
+        uint _yPrev;
+        _y = _d;
         /// @dev Iterative approximation.
         for (uint i; i < MAX_LOOP_LIMIT; ) {
-            yPrev = y;
-            y = (y * y + c) / (y * 2 + b - _d);
-            if (y.within1(yPrev)) {
+            _yPrev = _y;
+            //_y = (_y.mul(_y) + _c) / (_y * 2 + _b - _d);
+            _y = (_y.mul(_y) + _c).div(2.mulUnsafeFirst(_y) + _b - _d);
+            if (_y.within1(_yPrev)) {
                 break;
             }
             unchecked {
@@ -436,12 +474,13 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
             /// Originally https://github.com/saddle-finance/saddle-contract/blob/0b76f7fb519e34b878aa1d58cffc8d8dc0572c12/contracts/SwapUtils.sol#L319.
             /// Returns the invariant, at the precision of the pool.
             unchecked {
-                uint _adjustedReserve0 = _reserve0 * token0PrecisionMultiplier;
-                uint _adjustedReserve1 = _reserve1 * token1PrecisionMultiplier;
+                /// @dev It's safe because the token precision multiplier will never be zero.
+                uint _adjustedReserve0 = token0PrecisionMultiplier.mulUnsafeFirst(_reserve0);
+                uint _adjustedReserve1 = token1PrecisionMultiplier.mulUnsafeFirst(_reserve1);
                 _invariant = _computeDFromAdjustedBalances(_adjustedReserve0, _adjustedReserve1);
             }
         } else {
-            _invariant = (_reserve0 * _reserve1).sqrt();
+            _invariant = (_reserve0.mul(_reserve1)).sqrt();
         }
     }
 
@@ -454,9 +493,29 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
             uint _prevD;
             uint _d = _s;
             for (uint i; i < MAX_LOOP_LIMIT; ) {
-                uint _dP = (((_d * _d) / _xp0) * _d) / _xp1 / 4;
+                //uint _dP = mulDiv(_d.mulDiv(_d, _xp0), _d, / _xp1) / 4;
+                uint _dP = _d.mulDiv(_d, _xp0).mulDiv(_d, _xp1);
                 _prevD = _d;
-                _d = (((N_A * _s) + 2 * _dP) * _d) / ((N_A - 1) * _d + 3 * _dP);
+                //_d = (((N_A * _s) + 2 * _dP) * _d) / ((N_A - 1) * _d + 3 * _dP);
+
+
+                //_d = ((N_A.mul(_s) + 2.mul(_dP)) * _d) / ((N_A - 1).mul(_d) + 3.mul(_dP));
+                /*
+                _d = mulDiv(
+                    N_A.mul(_s) + _dP.divUnsafe(2),
+                    _d,
+                    (N_A - 1).mul(_d) + 3.mulDiv(_dP, 4)
+                );
+                */
+                _d = (
+                    /// @dev `N_A` and `_s` will never be zero, so this value will never be zero.
+                    (N_A.mul(_s) + _dP.divUnsafeLast(2))
+                        .mulDivUnsafeFirst(
+                            _d,
+                            (N_A - 1).mul(_d) + 3.mulDivUnsafeBoth(_dP, 4)
+                        )
+                );
+
                 if (_d.within1(_prevD)) {
                     break;
                 }
