@@ -12,47 +12,53 @@ import "./interfaces/ISyncSwapCallback.sol";
 import "./SyncSwapERC20.sol";
 import "./SyncSwapLibrary.sol";
 
-import 'hardhat/console.sol';
-
 contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
+    using Math for uint;
 
-    /// @dev Minimum liquidity to lock on the first liquidity provision.
     uint private constant MINIMUM_LIQUIDITY = 1000;
-
-    uint8 internal constant PRECISION = 112;
-
-    /// @dev Constant value used as max loop limit.
     uint private constant MAX_LOOP_LIMIT = 256;
-
-    /// @dev Minimum fees to transfer protocol fee fraction.
-    uint private constant MINIMUM_FEES = 1000;
-
-    uint private constant SWAP_FEE_PRECISION = 1e6;
+    uint private constant MAX_FEE = 1e5; /// @dev 100%.
 
     address public immutable override factory;
-    bool public immutable override stable;
     address public immutable override token0;
     address public immutable override token1;
+    /// @dev Whether the pool is stable, determines the invariant to use (either x*y=k or hybrid).
+    bool public immutable override stable;
 
+    /// @dev Amplification coefficient chosen from fluctuation of prices around 1 = 1.
+    /// The value is only for stable pools, and has no effects on non-stable pools.
     uint public A;
-    uint internal N_A; // @dev 2 * A.
-    uint internal constant A_PRECISION = 100;
+    uint private N_A; /// @dev 2 * A.
 
-    uint public immutable override decimals0;
-    uint public immutable override decimals1;
+    /// @dev Multipliers for each pooled token's precision to get to the pool precision decimals
+    /// which is agnostic to the pool, but usually is 18.
+    /// For example, TBTC has 18 decimals, so the multiplier should be 10 ** (18 - 18) = 1.
+    /// WBTC has 8, so the multiplier should be 10 ** (18 - 8) => 10 ** 10.
+    /// The value is only for stable pools, and has no effects on non-stable pools.
+    uint public immutable override token0PrecisionMultiplier;
+    uint public immutable override token1PrecisionMultiplier;
 
+    /// @dev Pool reserve of each pool token as of immediately after the most recent balance event.
+    /// The value is used to measure growth in invariant on mints and input tokens on swaps.
     uint public override reserve0;
     uint public override reserve1;
-    uint internal invariantLast;
+    /// @dev Invariant of the pool as of immediately after the most recent liquidity event.
+    /// The value is used to measure growth in invariant when protocol fee is enabled,
+    /// and will be reset to zero if protocol fee is disabled.
+    uint private invariantLast;
 
-    constructor(address _token0, address _token1, bool _stable, uint _decimals0, uint _decimals1) {
-        (factory, token0, token1, stable, decimals0, decimals1) = (
-            msg.sender, _token0, _token1, _stable, _decimals0, _decimals1
-        );
-    }
-
-    function _notifySwapFee(address _from, uint _amount0In, uint _amount1In) private returns (uint24 _swapFee) {
-        _swapFee = ISyncSwapFactory(factory).notifySwapFee(address(this), msg.sender, _from, _amount0In, _amount1In);
+    /// @dev Factory must ensures that the parameters are valid.
+    constructor(address _token0, address _token1, uint _a, uint _token0PrecisionMultiplier, uint _token1PrecisionMultiplier) payable {
+        factory = msg.sender;
+        token0 = _token0;
+        token1 = _token1;
+        if (_a != 0) {
+            stable = true;
+            A = _a;
+            N_A = 2.mulUnsafeFirst(_a);
+            token0PrecisionMultiplier = _token0PrecisionMultiplier;
+            token1PrecisionMultiplier = _token1PrecisionMultiplier;
+        }
     }
 
     /// @dev Mints LP tokens - should be called via the router after transferring pool tokens.
@@ -72,7 +78,7 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
         _reserve1 += _fee1;
 
         // Calculates old invariant (where unbalanced fee added to) and, mint protocol fee if any.
-        (uint _totalSupply, uint _oldInvariant) = _mintProtocolFee(_reserve0, _reserve1);
+        (bool _feeOn, uint _totalSupply, uint _oldInvariant) = _mintProtocolFee(_reserve0, _reserve1);
 
         if (_totalSupply == 0) {
             _liquidity = _newInvariant - MINIMUM_LIQUIDITY;
@@ -88,7 +94,9 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
 
         // Updates reserves and last invariant with new balances.
         _updateReserves(_balance0, _balance1);
-        invariantLast = _newInvariant;
+        if (_feeOn) {
+            invariantLast = _newInvariant;
+        }
 
         emit Mint(msg.sender, _amount0, _amount1, _to, _liquidity);
     }
@@ -100,11 +108,12 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
         uint _liquidity = balanceOf[address(this)];
 
         // Mints protocol fee if any.
-        (uint _totalSupply, ) = _mintProtocolFee(_balance0, _balance1); // TODO DIFFERENCE
+        // TODO can they mess up the pool if transferred some unbalanced tokens on purpose?
+        (bool _feeOn, uint _totalSupply, ) = _mintProtocolFee(_balance0, _balance1);
 
         // Calculates amounts of pool tokens proportional to balances.
-        _amount0 = _liquidity * _balance0 / _totalSupply;
-        _amount1 = _liquidity * _balance1 / _totalSupply;
+        _amount0 = _liquidity.mulDiv(_balance0, _totalSupply);
+        _amount1 = _liquidity.mulDiv(_balance1, _totalSupply);
         //require(_amount0 != 0 || _amount1 != 0); // unchecked to save gas, should be done through router.
 
         // Burns liquidity and transfers pool tokens.
@@ -120,7 +129,9 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
             _balance1 -= _amount1;
         }
         _updateReserves(_balance0, _balance1);
-        invariantLast = _computeInvariant(_balance0, _balance1);
+        if (_feeOn) {
+            invariantLast = _computeInvariant(_balance0, _balance1);
+        }
 
         emit Burn(msg.sender, _amount0, _amount1, _to, _liquidity);
     }
@@ -133,11 +144,11 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
         uint _liquidity = balanceOf[address(this)];
 
         // Mints protocol fee if any.
-        (uint _totalSupply, ) = _mintProtocolFee(_balance0, _balance1);
+        (bool _feeOn, uint _totalSupply, ) = _mintProtocolFee(_balance0, _balance1);
 
         // Calculates amounts of pool tokens proportional to balances.
-        uint _amount0 = _liquidity * _balance0 / _totalSupply;
-        uint _amount1 = _liquidity * _balance1 / _totalSupply;
+        uint _amount0 = _liquidity.mulDiv(_balance0, _totalSupply);
+        uint _amount1 = _liquidity.mulDiv(_balance1, _totalSupply);
 
         // Burns liquidity and, update last invariant using counterfactuals balances.
         _burn(address(this), _liquidity);
@@ -147,7 +158,7 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
         if (_tokenOut == token1) {
             // Swap `token0` for `token1`.
             _amount1 += _getAmountOut(_amount0, _balance0 - _amount0, _balance1 - _amount1, true);
-            TransferHelper.safeTransfer(token1, _amount1, _to);
+            TransferHelper.safeTransfer(token1, _to, _amount1);
             _amountOut = _amount1;
             _amount0 = 0;
             _balance1 -= _amount1;
@@ -156,7 +167,7 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
             // Swap `token1` for `token0`.
             require(_tokenOut == token0); // ensures to prevent from messing up the pool with bad parameters.
             _amount0 += _getAmountOut(_amount1, _balance0 - _amount0, _balance1 - _amount1, false);
-            TransferHelper.safeTransfer(token0, _amount0, _to);
+            TransferHelper.safeTransfer(token0, _to, _amount0);
             _amountOut = _amount0;
             _amount1 = 0;
             _balance0 -= _amount0;
@@ -165,7 +176,9 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
         // Update reserves and last invariant with up-to-date balances (updated above).
         /// @dev Using counterfactuals balances here to save gas.
         _updateReserves(_balance0, _balance1);
-        invariantLast = _computeInvariant(_balance0, _balance1);
+        if (_feeOn) {
+            invariantLast = _computeInvariant(_balance0, _balance1);
+        }
 
         emit Burn(msg.sender, _amount0, _amount1, _to, _liquidity);
     }
@@ -203,7 +216,7 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
         }
 
         // Transfers output tokens.
-        TransferHelper.safeTransfer(_tokenOut, _amountOut, _to);
+        TransferHelper.safeTransfer(_tokenOut, _to, _amountOut);
 
         // Update reserves with up-to-date balances (updated above).
         /// @dev Using counterfactuals balances here to save gas.
@@ -218,17 +231,17 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
 
         // Transfers output tokens optimistically, and calculates input tokens required.
         if (_amountOut0 != 0) {
-            TransferHelper.safeTransfer(token0, _amountOut0, _to);
+            TransferHelper.safeTransfer(token0, _to, _amountOut0);
             _amountIn1 = _getAmountIn(_amountOut0, _reserve0, _reserve1, true);
         }
         if (_amountOut1 != 0) {
-            TransferHelper.safeTransfer(token1, _amountOut1, _to);
+            TransferHelper.safeTransfer(token1, _to, _amountOut1);
             _amountIn0 = _getAmountIn(_amountOut1, _reserve0, _reserve1, false);
         }
 
         // Calls the callback with amounts if has data.
-        if (data.length != 0) {
-            ISyncSwapCallback(msg.sender).syncSwapCallback(_amountIn0, _amountIn1, _amountOut0, _amountOut1, data);
+        if (_data.length != 0) {
+            ISyncSwapCallback(msg.sender).syncSwapCallback(_amountIn0, _amountIn1, _amountOut0, _amountOut1, _data);
         }
 
         // Ensures required input tokens are received.
@@ -244,25 +257,6 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
         emit Swap(msg.sender, _amountIn0, _amountIn1, _amountOut0, _amountOut1, _to);
     }
 
-    /// @dev This fee is charged to cover for `swapFee` when users add unbalanced liquidity.
-    function _unbalancedMintFee(
-        uint _amount0,
-        uint _amount1,
-        uint _reserve0,
-        uint _reserve1
-    ) private view returns (uint _token0Fee, uint _token1Fee) {
-        if (_reserve0 == 0 || _reserve1 == 0) {
-            return (0, 0);
-        }
-        uint _amount1Optimal = (_amount0 * _reserve1) / _reserve0;
-        if (_amount1 >= _amount1Optimal) {
-            _token1Fee = (swapFee * (_amount1 - _amount1Optimal)) / (2 * MAX_FEE);
-        } else {
-            uint _amount0Optimal = (_amount1 * _reserve0) / _reserve1;
-            _token0Fee = (swapFee * (_amount0 - _amount0Optimal)) / (2 * MAX_FEE);
-        }
-    }
-
     function _updateReserves(uint _balance0, uint _balance1) private {
         (reserve0, reserve1) = (_balance0, _balance1);
         emit Sync(_balance0, _balance1);
@@ -273,14 +267,74 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
         _balance1 = IERC20(token1).balanceOf(address(this));
     }
 
+    function _getSwapFee() private view returns (uint16 _swapFee) {
+        _swapFee = ISyncSwapFactory(factory).getSwapFee(address(this), msg.sender);
+    }
+
+    /// @dev This fee is charged to cover for the swap fee when users add unbalanced liquidity.
+    function _unbalancedMintFee(
+        uint _amount0,
+        uint _amount1,
+        uint _reserve0,
+        uint _reserve1
+    ) private view returns (uint _token0Fee, uint _token1Fee) {
+        if (_reserve0 == 0 || _reserve1 == 0) {
+            return (0, 0);
+        }
+        //uint _amount1Optimal = (_amount0 * _reserve1) / _reserve0;
+        uint _amount1Optimal = _amount0.mulDiv(_reserve1, _reserve0);
+        if (_amount1 >= _amount1Optimal) {
+            //_token1Fee = (_getSwapFee() * (_amount1 - _amount1Optimal)) / (2 * MAX_FEE);
+            _token1Fee = _getSwapFee().mulDivUnsafeLast(
+                (_amount1 - _amount1Optimal),
+                (2 * MAX_FEE)
+            );
+        } else {
+            //uint _amount0Optimal = (_amount1 * _reserve0) / _reserve1;
+            uint _amount0Optimal = _amount1.mulDiv(_reserve0, _reserve1);
+            //_token0Fee = (_getSwapFee() * (_amount0 - _amount0Optimal)) / (2 * MAX_FEE);
+            _token1Fee = _getSwapFee().mulDivUnsafeLast(
+                (_amount0 - _amount0Optimal),
+                (2 * MAX_FEE)
+            );
+        }
+    }
+
+    function _mintProtocolFee(uint _reserve0, uint _reserve1) private returns (bool _feeOn, uint _totalSupply, uint _invariant) {
+        _totalSupply = totalSupply;
+        _invariant = _computeInvariant(_reserve0, _reserve1);
+
+        address _feeRecipient = ISyncSwapFactory(factory).feeRecipient();
+        _feeOn = (_feeRecipient != address(0));
+
+        uint _invariantLast = invariantLast;
+        if (_invariantLast != 0) {
+            if (_feeOn) {
+                if (_invariant > _invariantLast) {
+                    /// @dev Mints `protocolFee` % of growth in liquidity (invariant).
+                    uint _protocolFee = ISyncSwapFactory(factory).protocolFee();
+                    uint _numerator = (_invariant - _invariantLast).mulUnsafeFirst(_totalSupply).mul(_protocolFee);
+                    uint _denominator = _invariant.mulUnsafeFirst(MAX_FEE - _protocolFee) + _invariantLast.mulUnsafeFirst(_protocolFee);
+                    uint _liquidity = _numerator.div(_denominator);
+
+                    if (_liquidity != 0) {
+                        _mint(_feeRecipient, _liquidity);
+                        _totalSupply += _liquidity; // update cached value.
+                    }
+                }
+            } else {
+                /// @dev Reset last invariant to clear measured growth if protocol fee is not enabled.
+                invariantLast = 0;
+            }
+        }
+    }
+
     function getAmountOut(address _tokenIn, uint _amountIn) external view override returns (uint _finalAmountOut) {
-        (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
-        _finalAmountOut = _getAmountOut(_amountIn, _reserve0, _reserve1, _tokenIn == token0);
+        _finalAmountOut = _getAmountOut(_amountIn, reserve0, reserve1, _tokenIn == token0);
     }
 
     function getAmountIn(address _tokenOut, uint256 _amountOut) external view override returns (uint _finalAmountIn) {
-        (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
-        _finalAmountOut = _getAmountIn(_amountOut, _reserve0, _reserve1, _tokenOut == token0);
+        _finalAmountIn = _getAmountIn(_amountOut, reserve0, reserve1, _tokenOut == token0);
     }
 
     function _getAmountOut(
@@ -291,29 +345,37 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
     ) private view returns (uint _dy) {
         if (stable) {
             unchecked {
-                uint _adjustedReserve0 = _reserve0 * token0PrecisionMultiplier;
-                uint _adjustedReserve1 = _reserve1 * token1PrecisionMultiplier;
-                uint _feeDeductedAmountIn = _amountIn - (_amountIn * swapFee) / MAX_FEE;
+                uint _adjustedReserve0 = token0PrecisionMultiplier.mulUnsafeFirst(_reserve0);
+                uint _adjustedReserve1 = token1PrecisionMultiplier.mulUnsafeFirst(_reserve1);
+                uint _feeDeductedAmountIn = _amountIn - _amountIn.mulDivUnsafeLast(_getSwapFee(), MAX_FEE);
                 uint _d = _computeDFromAdjustedBalances(_adjustedReserve0, _adjustedReserve1);
 
                 if (_token0In) {
-                    uint _x = _adjustedReserve0 + (_feeDeductedAmountIn * token0PrecisionMultiplier);
+                    uint _x = _adjustedReserve0 + (token0PrecisionMultiplier.mulUnsafeFirst(_feeDeductedAmountIn));
                     uint _y = _getY(_x, _d);
                     _dy = _adjustedReserve1 - _y - 1;
                     _dy /= token1PrecisionMultiplier;
                 } else {
-                    uint _x = _adjustedReserve1 + (_feeDeductedAmountIn * token1PrecisionMultiplier);
+                    uint _x = _adjustedReserve1 + (token1PrecisionMultiplier.mulUnsafeFirst(_feeDeductedAmountIn));
                     uint _y = _getY(_x, _d);
                     _dy = _adjustedReserve0 - _y - 1;
                     _dy /= token0PrecisionMultiplier;
                 }
             }
         } else {
-            uint _amountInWithFee = _amountIn * (MAX_FEE - swapFee);
+            uint _amountInWithFee = _amountIn.mul(MAX_FEE - _getSwapFee());
             if (_token0In) {
-                _dy = (_amountInWithFee * _reserve1) / (_reserve0 * MAX_FEE + _amountInWithFee);
+                //_dy = (_amountInWithFee * _reserve1) / (_reserve0 * MAX_FEE + _amountInWithFee);
+                _dy = _amountInWithFee.mulDiv(
+                    _reserve1,
+                    (MAX_FEE.mulUnsafeFirst(_reserve0) + _amountInWithFee)
+                );
             } else {
-                _dy = (_amountInWithFee * _reserve0) / (_reserve1 * MAX_FEE + _amountInWithFee);
+                //_dy = (_amountInWithFee * _reserve0) / (_reserve1 * MAX_FEE + _amountInWithFee);
+                _dy = _amountInWithFee.mulDiv(
+                    _reserve0,
+                    (MAX_FEE.mulUnsafeFirst(_reserve1) + _amountInWithFee)
+                );
             }
         }
     }
@@ -326,8 +388,8 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
     ) private view returns (uint _dx) {
         if (stable) {
             unchecked {
-                uint _adjustedReserve0 = _reserve0 * token0PrecisionMultiplier;
-                uint _adjustedReserve1 = _reserve1 * token1PrecisionMultiplier;
+                uint _adjustedReserve0 = token0PrecisionMultiplier.mulUnsafeFirst(_reserve0);
+                uint _adjustedReserve1 = token1PrecisionMultiplier.mulUnsafeFirst(_reserve1);
                 uint _d = _computeDFromAdjustedBalances(_adjustedReserve0, _adjustedReserve1);
 
                 if (_token0Out) {
@@ -336,23 +398,41 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
                         return 1;
                     }
                     uint _x = _getY(_y, _d);
-                    _dx = MAX_FEE * (_x - _adjustedReserve1) / (MAX_FEE - swapFee) + 1;
-                    _dx /= token1PrecisionMultiplier;
+                    //_dx = MAX_FEE.mulUnsafeFirst(_x - _adjustedReserve1).divUnsafeLast((MAX_FEE - _getSwapFee()) + 1);
+                    /// @dev It's safe here because both `MAX_FEE` and `(MAX_FEE - _getSwapFee()) + 1` will never be zero.
+                    _dx = MAX_FEE.mulDivUnsafeBoth(
+                        _x - _adjustedReserve1,
+                        (MAX_FEE - _getSwapFee()) + 1
+                    );
+                    _dx = _dx.divUnsafeLast(token1PrecisionMultiplier);
                 } else {
                     uint _y = _adjustedReserve1 - _amountOut;
                     if (_y <= 1) {
                         return 1;
                     }
                     uint _x = _getY(_y, _d);
-                    _dx = MAX_FEE * (_x - _adjustedReserve0) / (MAX_FEE - swapFee) + 1;
-                    _dx /= token0PrecisionMultiplier;
+                    //_dx = MAX_FEE.mulUnsafeFirst(_x - _adjustedReserve0).divUnsafeLast((MAX_FEE - _getSwapFee()) + 1);
+                    /// @dev It's safe here because both `MAX_FEE` and `(MAX_FEE - _getSwapFee()) + 1` will never be zero.
+                    _dx = MAX_FEE.mulDivUnsafeBoth(
+                        _x - _adjustedReserve0,
+                        (MAX_FEE - _getSwapFee()) + 1
+                    );
+                    _dx = _dx.divUnsafeLast(token0PrecisionMultiplier);
                 }
             }
         } else {
             if (_token0Out) {
-                _dx = (_reserve1 * _amountOut * MAX_FEE) / ((_reserve0 - _amountOut) * (MAX_FEE - swapFee)) + 1;
+                //_dx = (_reserve1 * _amountOut * MAX_FEE) / ((_reserve0 - _amountOut) * (MAX_FEE - _getSwapFee())) + 1;
+                _dx = MAX_FEE.mulDivUnsafeFirst(
+                    _reserve1.mul(_amountOut),
+                    ((_reserve0 - _amountOut).mul(MAX_FEE - _getSwapFee()))
+                ) + 1;
             } else {
-                _dx = (_reserve0 * _amountOut * MAX_FEE) / ((_reserve1 - _amountOut) * (MAX_FEE - swapFee)) + 1;
+                //_dx = (_reserve0 * _amountOut * MAX_FEE) / ((_reserve1 - _amountOut) * (MAX_FEE - _getSwapFee())) + 1;
+                _dx = MAX_FEE.mulDivUnsafeFirst(
+                    _reserve0.mul(_amountOut),
+                    ((_reserve1 - _amountOut).mul(MAX_FEE - _getSwapFee()))
+                ) + 1;
             }
         }
     }
@@ -362,19 +442,23 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
     /// This function is used as a helper function to calculate how much TO token
     /// the user should receive on swap.
     /// @dev Originally https://github.com/saddle-finance/saddle-contract/blob/0b76f7fb519e34b878aa1d58cffc8d8dc0572c12/contracts/SwapUtils.sol#L432.
-    /// @param x The new total amount of FROM token.
+    /// @param _x The new total amount of FROM token.
     /// @return y The amount of TO token that should remain in the pool.
-    function _getY(uint x, uint _d) internal view returns (uint y) {
-        uint c = (_d * _d) / (x * 2);
-        c = (c * _d) / ((N_A * 2) / A_PRECISION);
-        uint b = x + ((_d * A_PRECISION) / N_A);
-        uint yPrev;
-        y = D;
+    function _getY(uint _x, uint _d) private view returns (uint _y) {
+        //uint _c = (_d * _d) / 2.mulUnsafeFirst(_x);
+        uint _c = _d.mulDiv(_d, 2.mulUnsafeFirst(_x));
+        //_c = (_c * _d) / 2.mulUnsafeFirst(N_A);
+        _c = _c.mulDiv(_d, 2.mulUnsafeFirst(N_A));
+        //uint _b = _x + (_d / N_A);
+        uint _b = _x + _d.divUnsafeLast(N_A); /// @dev N_A will never be zero.
+        uint _yPrev;
+        _y = _d;
         /// @dev Iterative approximation.
         for (uint i; i < MAX_LOOP_LIMIT; ) {
-            yPrev = y;
-            y = (y * y + c) / (y * 2 + b - _d);
-            if (y.within1(yPrev)) {
+            _yPrev = _y;
+            //_y = (_y.mul(_y) + _c) / (_y * 2 + _b - _d);
+            _y = (_y.mul(_y) + _c).div(2.mulUnsafeFirst(_y) + _b - _d);
+            if (_y.within1(_yPrev)) {
                 break;
             }
             unchecked {
@@ -383,19 +467,20 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
         }
     }
 
-    function _computeInvariant(uint _reserve0, uint _reserve1) internal view returns (uint _invariant) {
+    function _computeInvariant(uint _reserve0, uint _reserve1) private view returns (uint _invariant) {
         if (stable) {
             /// @dev Get D, the StableSwap invariant, based on a set of balances and a particular A.
             /// See the StableSwap paper for details.
             /// Originally https://github.com/saddle-finance/saddle-contract/blob/0b76f7fb519e34b878aa1d58cffc8d8dc0572c12/contracts/SwapUtils.sol#L319.
             /// Returns the invariant, at the precision of the pool.
             unchecked {
-                uint _adjustedReserve0 = _reserve0 * token0PrecisionMultiplier;
-                uint _adjustedReserve1 = _reserve1 * token1PrecisionMultiplier;
+                /// @dev It's safe because the token precision multiplier will never be zero.
+                uint _adjustedReserve0 = token0PrecisionMultiplier.mulUnsafeFirst(_reserve0);
+                uint _adjustedReserve1 = token1PrecisionMultiplier.mulUnsafeFirst(_reserve1);
                 _invariant = _computeDFromAdjustedBalances(_adjustedReserve0, _adjustedReserve1);
             }
         } else {
-            _invariant = Math.sqrt(_reserve0 * _reserve1);
+            _invariant = (_reserve0.mul(_reserve1)).sqrt();
         }
     }
 
@@ -408,9 +493,29 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
             uint _prevD;
             uint _d = _s;
             for (uint i; i < MAX_LOOP_LIMIT; ) {
-                uint _dP = (((_d * _d) / _xp0) * _d) / _xp1 / 4;
+                //uint _dP = mulDiv(_d.mulDiv(_d, _xp0), _d, / _xp1) / 4;
+                uint _dP = (_d.mulDiv(_d, _xp0)).mulDiv(_d, _xp1);
                 _prevD = _d;
-                _d = (((N_A * _s) / A_PRECISION + 2 * _dP) * _d) / ((N_A / A_PRECISION - 1) * _d + 3 * _dP);
+                //_d = (((N_A * _s) + 2 * _dP) * _d) / ((N_A - 1) * _d + 3 * _dP);
+
+
+                //_d = ((N_A.mul(_s) + 2.mul(_dP)) * _d) / ((N_A - 1).mul(_d) + 3.mul(_dP));
+                /*
+                _d = mulDiv(
+                    N_A.mul(_s) + _dP.divUnsafe(2),
+                    _d,
+                    (N_A - 1).mul(_d) + 3.mulDiv(_dP, 4)
+                );
+                */
+                _d = (
+                    /// @dev `N_A` and `_s` will never be zero, so this value will never be zero.
+                    (N_A.mul(_s) + _dP.divUnsafeLast(2))
+                        .mulDivUnsafeFirst(
+                            _d,
+                            (N_A - 1).mul(_d) + 3.mulDivUnsafeBoth(_dP, 4)
+                        )
+                );
+
                 if (_d.within1(_prevD)) {
                     break;
                 }
@@ -419,29 +524,6 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
                 }
             }
             _computed = _d;
-        }
-    }
-
-    function _mintProtocolFee(uint _reserve0, uint _reserve1) private returns (uint _totalSupply, uint _invariant) {
-        _totalSupply = totalSupply;
-        uint _invariantLast = invariantLast;
-        /// @dev `invariantLast` is only zero on the first mint, and there is no protocol fee to mint.
-        /// The invariant value returned is only used for measure invariant growth and unbalanced fee
-        /// (which is also zero on the first mint) so it's safe to skip.
-        if (_invariantLast != 0) {
-            _invariant = _computeInvariant(_reserve0, _reserve1);
-            if (_invariant > _invariantLast) {
-                /// @dev `protocolFee` % of increase in liquidity.
-                uint _protocolFee = protocolFee;
-                uint _numerator = _totalSupply * (_invariant - _invariantLast) * _protocolFee;
-                uint _denominator = (MAX_FEE - _protocolFee) * _invariant + _protocolFee * _invariantLast;
-                uint _liquidity = numerator / denominator;
-
-                if (_liquidity != 0) {
-                    _mint(protocolFeeTo, _liquidity);
-                    //_totalSupply += liquidity; // TODO mint will increase this right?
-                }
-            }
         }
     }
 

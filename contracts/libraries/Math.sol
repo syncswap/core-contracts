@@ -2,97 +2,226 @@
 
 pragma solidity ^0.8.0;
 
-/**
- * @dev Math utilities missing in the Solidity language.
- *
- * Based on OpenZeppelin's Math library.
- * https://github.com/OpenZeppelin/openzeppelin-contracts/blob/561d1061fc568f04c7a65853538e834a889751e8/contracts/utils/math/Math.sol
- */
+ /// @dev Modified from Solmate (https://github.com/Rari-Capital/solmate/blob/main/src/utils/FixedPointMathLib.sol)
 library Math {
-    /**
-     * @dev Returns the smallest of two numbers.
-     */
-    function min(uint256 a, uint256 b) internal pure returns (uint256) {
-        return a < b ? a : b;
+
+    function sqrt(uint256 x) internal pure returns (uint256 z) {
+        assembly {
+            let y := x // We start y at x, which will help us make our initial estimate.
+
+            z := 181 // The "correct" value is 1, but this saves a multiplication later.
+
+            // This segment is to get a reasonable initial estimate for the Babylonian method. With a bad
+            // start, the correct # of bits increases ~linearly each iteration instead of ~quadratically.
+
+            // We check y >= 2^(k + 8) but shift right by k bits
+            // each branch to ensure that if x >= 256, then y >= 256.
+            if iszero(lt(y, 0x10000000000000000000000000000000000)) {
+                y := shr(128, y)
+                z := shl(64, z)
+            }
+            if iszero(lt(y, 0x1000000000000000000)) {
+                y := shr(64, y)
+                z := shl(32, z)
+            }
+            if iszero(lt(y, 0x10000000000)) {
+                y := shr(32, y)
+                z := shl(16, z)
+            }
+            if iszero(lt(y, 0x1000000)) {
+                y := shr(16, y)
+                z := shl(8, z)
+            }
+
+            // Goal was to get z*z*y within a small factor of x. More iterations could
+            // get y in a tighter range. Currently, we will have y in [256, 256*2^16).
+            // We ensured y >= 256 so that the relative difference between y and y+1 is small.
+            // That's not possible if x < 256 but we can just verify those cases exhaustively.
+
+            // Now, z*z*y <= x < z*z*(y+1), and y <= 2^(16+8), and either y >= 256, or x < 256.
+            // Correctness can be checked exhaustively for x < 256, so we assume y >= 256.
+            // Then z*sqrt(y) is within sqrt(257)/sqrt(256) of sqrt(x), or about 20bps.
+
+            // For s in the range [1/256, 256], the estimate f(s) = (181/1024) * (s+1) is in the range
+            // (1/2.84 * sqrt(s), 2.84 * sqrt(s)), with largest error when s = 1 and when s = 256 or 1/256.
+
+            // Since y is in [256, 256*2^16), let a = y/65536, so that a is in [1/256, 256). Then we can estimate
+            // sqrt(y) using sqrt(65536) * 181/1024 * (a + 1) = 181/4 * (y + 65536)/65536 = 181 * (y + 65536)/2^18.
+
+            // There is no overflow risk here since y < 2^136 after the first branch above.
+            z := shr(18, mul(z, add(y, 65536))) // A mul() is saved from starting z at 181.
+
+            // Given the worst case multiplicative error of 2.84 above, 7 iterations should be enough.
+            z := shr(1, add(z, div(x, z)))
+            z := shr(1, add(z, div(x, z)))
+            z := shr(1, add(z, div(x, z)))
+            z := shr(1, add(z, div(x, z)))
+            z := shr(1, add(z, div(x, z)))
+            z := shr(1, add(z, div(x, z)))
+            z := shr(1, add(z, div(x, z)))
+
+            // If x+1 is a perfect square, the Babylonian method cycles between
+            // floor(sqrt(x)) and ceil(sqrt(x)). This statement ensures we return floor.
+            // See: https://en.wikipedia.org/wiki/Integer_square_root#Using_only_integer_division
+            // Since the ceil is rare, we save gas on the assignment and repeat division in the rare case.
+            // If you don't care whether the floor or ceil square root is returned, you can remove this statement.
+            z := sub(z, lt(div(x, z), z))
+        }
     }
 
-    /**
-     * @dev Returns the square root of a number. If the number is not a perfect square, the value is rounded down.
-     *
-     * Inspired by Henry S. Warren, Jr.'s "Hacker's Delight" (Chapter 11).
-     */
-    function sqrt(uint256 a) internal pure returns (uint256) {
-        if (a == 0) {
-            return 0;
-        }
+    /// @dev Rounded down.
+    function mulDiv(
+        uint256 x,
+        uint256 y,
+        uint256 denominator
+    ) external pure returns (uint256 z) {
+        assembly {
+            // Store x * y in z for now.
+            z := mul(x, y)
 
-        // For our first guess, we get the biggest power of 2 which is smaller than the square root of the target.
-        //
-        // We know that the "msb" (most significant bit) of our target number `a` is a power of 2 such that we have
-        // `msb(a) <= a < 2*msb(a)`. This value can be written `msb(a)=2**k` with `k=log2(a)`.
-        //
-        // This can be rewritten `2**log2(a) <= a < 2**(log2(a) + 1)`
-        // → `sqrt(2**k) <= sqrt(a) < sqrt(2**(k+1))`
-        // → `2**(k/2) <= sqrt(a) < 2**((k+1)/2) <= 2**(k/2 + 1)`
-        //
-        // Consequently, `2**(log2(a) / 2)` is a good first approximation of `sqrt(a)` with at least 1 correct bit.
-        uint256 result = 1 << (log2(a) >> 1);
+            // Equivalent to require(denominator != 0 && (x == 0 || (x * y) / x == y))
+            if iszero(and(iszero(iszero(denominator)), or(iszero(x), eq(div(z, x), y)))) {
+                revert(0, 0)
+            }
 
-        // At this point `result` is an estimation with one bit of precision. We know the true value is a uint128,
-        // since it is the square root of a uint256. Newton's method converges quadratically (precision doubles at
-        // every iteration). We thus need at most 7 iteration to turn our partial result with one bit of precision
-        // into the expected uint128 result.
-        unchecked {
-            result = (result + a / result) >> 1;
-            result = (result + a / result) >> 1;
-            result = (result + a / result) >> 1;
-            result = (result + a / result) >> 1;
-            result = (result + a / result) >> 1;
-            result = (result + a / result) >> 1;
-            result = (result + a / result) >> 1;
-            return min(result, a / result);
+            // Divide z by the denominator.
+            z := div(z, denominator)
         }
     }
 
-    /**
-     * @dev Return the log in base 2, rounded down, of a positive value.
-     * Returns 0 if given 0.
-     */
-    function log2(uint256 value) internal pure returns (uint256) {
-        uint256 result = 0;
+    /// @dev Rounded down.
+    /// This function assumes that `x` is not zero, and must be checked externally.
+    function mulDivUnsafeFirst(
+        uint256 x,
+        uint256 y,
+        uint256 denominator
+    ) external pure returns (uint256 z) {
+        assembly {
+            // Store x * y in z for now.
+            z := mul(x, y)
+
+            // Equivalent to require(denominator != 0 && (x * y) / x == y)
+            if iszero(and(iszero(iszero(denominator)), eq(div(z, x), y))) {
+                revert(0, 0)
+            }
+
+            // Divide z by the denominator.
+            z := div(z, denominator)
+        }
+    }
+
+    /// @dev Rounded down.
+    /// This function assumes that `denominator` is not zero, and must be checked externally.
+    function mulDivUnsafeLast(
+        uint256 x,
+        uint256 y,
+        uint256 denominator
+    ) external pure returns (uint256 z) {
+        assembly {
+            // Store x * y in z for now.
+            z := mul(x, y)
+
+            // Equivalent to require(x == 0 || (x * y) / x == y)
+            if iszero(or(iszero(x), eq(div(z, x), y))) {
+                revert(0, 0)
+            }
+
+            // Divide z by the denominator.
+            z := div(z, denominator)
+        }
+    }
+
+    /// @dev Rounded down.
+    /// This function assumes that both `x` and `denominator` are not zero, and must be checked externally.
+    function mulDivUnsafeBoth(
+        uint256 x,
+        uint256 y,
+        uint256 denominator
+    ) external pure returns (uint256 z) {
+        assembly {
+            // Store x * y in z for now.
+            z := mul(x, y)
+
+            // Equivalent to require((x * y) / x == y)
+            if iszero(eq(div(z, x), y)) {
+                revert(0, 0)
+            }
+
+            // Divide z by the denominator.
+            z := div(z, denominator)
+        }
+    }
+
+    /// @notice Compares a and b and returns 'true' if the difference between a and b
+    /// is less than 1 or equal to each other.
+    /// @param a uint256 to compare with.
+    /// @param b uint256 to compare with.
+    function within1(uint256 a, uint256 b) internal pure returns (bool) {
         unchecked {
-            if (value >> 128 > 0) {
-                value >>= 128;
-                result += 128;
+            if (a > b) {
+                return a - b <= 1;
             }
-            if (value >> 64 > 0) {
-                value >>= 64;
-                result += 64;
-            }
-            if (value >> 32 > 0) {
-                value >>= 32;
-                result += 32;
-            }
-            if (value >> 16 > 0) {
-                value >>= 16;
-                result += 16;
-            }
-            if (value >> 8 > 0) {
-                value >>= 8;
-                result += 8;
-            }
-            if (value >> 4 > 0) {
-                value >>= 4;
-                result += 4;
-            }
-            if (value >> 2 > 0) {
-                value >>= 2;
-                result += 2;
-            }
-            if (value >> 1 > 0) {
-                result += 1;
+            return b - a <= 1;
+        }
+    }
+
+    /// @dev Optimized safe multiplication operation for minimal gas cost.
+    function mul(
+        uint256 x,
+        uint256 y
+    ) internal pure returns (uint256 z) {
+        assembly {
+            // Store x * y in z for now.
+            z := mul(x, y)
+
+            // Equivalent to require(x == 0 || (x * y) / x == y)
+            if iszero(or(iszero(x), eq(div(z, x), y))) {
+                revert(0, 0)
             }
         }
-        return result;
+    }
+
+    /// @dev Optimized unsafe multiplication operation for minimal gas cost.
+    /// This function assumes that `x` is not zero, and must be checked externally.
+    function mulUnsafeFirst(
+        uint256 x,
+        uint256 y
+    ) internal pure returns (uint256 z) {
+        assembly {
+            // Store x * y in z for now.
+            z := mul(x, y)
+
+            // Equivalent to require((x * y) / x == y)
+            if iszero(eq(div(z, x), y)) {
+                revert(0, 0)
+            }
+        }
+    }
+
+    /// @dev Optimized safe division operation for minimal gas cost.
+    function div(
+        uint256 x,
+        uint256 y
+    ) internal pure returns (uint256 z) {
+        assembly {
+            // Store x * y in z for now.
+            z := div(x, y)
+
+            // Equivalent to require(y != 0)
+            if iszero(y) {
+                revert(0, 0)
+            }
+        }
+    }
+
+    /// @dev Optimized unsafe division operation for minimal gas cost
+    /// - division by 0 will not reverts and returns 0, and must be checked externally.
+    function divUnsafeLast(
+        uint256 x,
+        uint256 y
+    ) internal pure returns (uint256 z) {
+        assembly {
+            z := div(x, y)
+        }
     }
 }
