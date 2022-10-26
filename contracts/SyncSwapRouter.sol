@@ -8,7 +8,6 @@ import "./interfaces/IPool.sol";
 import "./interfaces/IVault.sol";
 import "./interfaces/IBasePool.sol";
 import "./interfaces/ISyncSwapRouter.sol";
-import "./interfaces/ISyncSwapFactory.sol";
 import "./libraries/TransferHelper.sol";
 
 error NotEnoughLiquidityMinted();

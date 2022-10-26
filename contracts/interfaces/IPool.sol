@@ -3,20 +3,25 @@
 pragma solidity >=0.5.0;
 
 interface IPool {
-    function poolType() external view returns (uint16);
+    struct TokenAmount {
+        address token;
+        uint amount;
+    }
+
+    function poolType() external view returns (uint24);
 
     function factory() external view returns (address);
     //function vault() external view returns (address);
 
     function mint(bytes calldata data) external returns (uint liquidity);
+
     function burn(bytes calldata data) external returns (TokenAmount[] memory amounts);
+
     function burnSingle(bytes calldata data) external returns (uint amountOut);
+
     function swap(bytes calldata data) external returns (uint amountOut);
 
-    //function flashSwap(bytes calldata data) external returns (uint amountIn0, uint amountIn1);
+    function getAssets() external view returns (address[] memory assets);
 
-    struct TokenAmount {
-        address token;
-        uint amount;
-    }
+    //function flashSwap(bytes calldata data) external returns (uint amountIn0, uint amountIn1);
 }

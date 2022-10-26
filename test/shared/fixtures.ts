@@ -14,8 +14,8 @@ export async function deployFactory(feeRecipient: string): Promise<Contract> {
     return contract;
 }
 
-export async function deploySyncSwapERC20(totalSupply: BigNumber): Promise<Contract> {
-    const contractFactory = await ethers.getContractFactory('TestSyncSwapERC20');
+export async function deploySyncSwapLPToken(totalSupply: BigNumber): Promise<Contract> {
+    const contractFactory = await ethers.getContractFactory('TestSyncSwapLPToken');
     const contract = await contractFactory.deploy(totalSupply);
     await contract.deployed();
     return contract;
@@ -32,8 +32,8 @@ interface PairFixture {
 export async function pairFixture(wallet: SignerWithAddress, feeRecipient: SignerWithAddress): Promise<PairFixture> {
     const factory = await deployFactory(feeRecipient.address);
 
-    const tokenA = await deploySyncSwapERC20(expandTo18Decimals('100000000000000000000'));
-    const tokenB = await deploySyncSwapERC20(expandTo18Decimals('100000000000000000000'));
+    const tokenA = await deploySyncSwapLPToken(expandTo18Decimals('100000000000000000000'));
+    const tokenB = await deploySyncSwapLPToken(expandTo18Decimals('100000000000000000000'));
 
     await factory.createPool(tokenA.address, tokenB.address, true);
     await factory.createPool(tokenA.address, tokenB.address, false);

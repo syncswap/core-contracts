@@ -3,7 +3,7 @@ import { BigNumber, Contract } from 'ethers';
 import { solidity } from 'ethereum-waffle';
 import { expandTo18Decimals, getPermitSignature, getSplittedPermitSignature, MAX_UINT256 } from './shared/utilities';
 import { hexlify } from 'ethers/lib/utils';
-import { deploySyncSwapERC20 } from './shared/fixtures';
+import { deploySyncSwapLPToken } from './shared/fixtures';
 import { SignerWithAddress } from '@nomiclabs/hardhat-ethers/signers';
 
 chai.use(solidity)
@@ -13,7 +13,7 @@ const hre = require('hardhat');
 const TOTAL_SUPPLY = expandTo18Decimals(10000);
 const TEST_AMOUNT = expandTo18Decimals(10);
 
-describe('SyncSwapERC20', () => {
+describe('SyncSwapLPToken', () => {
   let wallet: SignerWithAddress;
   let other: SignerWithAddress;
   before(async () => {
@@ -24,12 +24,12 @@ describe('SyncSwapERC20', () => {
 
   let token: Contract;
   beforeEach(async () => {
-    token = await deploySyncSwapERC20(TOTAL_SUPPLY);
+    token = await deploySyncSwapLPToken(TOTAL_SUPPLY);
   })
 
   it('Should return expected token metadata', async () => {
-    expect(await token.name()).to.eq('SyncSwap SLP Token');
-    expect(await token.symbol()).to.eq('SLP');
+    expect(await token.name()).to.eq('SyncSwap LP Token');
+    expect(await token.symbol()).to.eq('SSLP');
     expect(await token.decimals()).to.eq(18);
     expect(await token.totalSupply()).to.eq(TOTAL_SUPPLY);
     expect(await token.balanceOf(wallet.address)).to.eq(TOTAL_SUPPLY);

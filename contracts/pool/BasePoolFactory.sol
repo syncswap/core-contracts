@@ -2,19 +2,16 @@
 
 pragma solidity ^0.8.0;
 
-import "./interfaces/IERC20.sol";
-import "./interfaces/IBasePool.sol";
-import "./interfaces/IVault.sol";
-import "./interfaces/IBasePoolFactory.sol";
-import "./libraries/Ownable.sol";
-import "./SyncSwapPool.sol";
+import "../interfaces/IBasePoolFactory.sol";
+
+import "../libraries/Ownable.sol";
 
 error IdenticalTokens();
 error PoolExists();
 error InvalidFee();
 
 /// @notice Canonical factory to deploy pools and control over fees.
-contract ConstantProductPoolFactory is IBasePoolFactory, Ownable {
+abstract contract BasePoolFactory is IBasePoolFactory, Ownable {
 
     uint private constant MAX_FEE = 1e5; /// @dev 100%.
     uint private constant MAX_SWAP_FEE = 3000; /// @dev 3%.
@@ -36,7 +33,7 @@ contract ConstantProductPoolFactory is IBasePoolFactory, Ownable {
     /// @inheritdoc IBasePoolFactory
     address[] public override pools;
 
-    bytes private deployData;
+    bytes internal cachedDeployData;
 
     constructor(address _vault, address _feeRecipient) {
         require(_vault != address(0));
@@ -44,8 +41,8 @@ contract ConstantProductPoolFactory is IBasePoolFactory, Ownable {
         feeRecipient = _feeRecipient;
     }
 
-    function getDeployData() external view override returns (bytes memory _deployData) {
-        _deployData = deployData;
+    function getDeployData() external view override returns (bytes memory deployData) {
+        deployData = cachedDeployData;
     }
 
     /// @inheritdoc IBasePoolFactory
@@ -76,9 +73,9 @@ contract ConstantProductPoolFactory is IBasePoolFactory, Ownable {
         }
 
         // Create the pool.
-        bytes memory _deployData = abi.encode(_tokenA, _tokenB);
-        bytes32 salt = keccak256(_deployData);
-        pool = address(new ConstantProductPool{salt: salt}());
+        //bytes memory _deployData = abi.encode(_tokenA, _tokenB);
+        //bytes32 salt = keccak256(_deployData);
+        pool = _deployPool(_tokenA, _tokenB);
 
         // Populate the pool.
         getPool[_tokenA][_tokenB] = pool;
@@ -88,6 +85,8 @@ contract ConstantProductPoolFactory is IBasePoolFactory, Ownable {
 
         emit PoolCreated(_tokenA, _tokenB, pool, pools.length);
     }
+
+    function _deployPool(address tokenA, address tokenB) internal virtual returns (address) {}
 
     /// @inheritdoc IBasePoolFactory
     function setFeeRecipient(address _feeRecipient) external override onlyOwner {
@@ -103,13 +102,13 @@ contract ConstantProductPoolFactory is IBasePoolFactory, Ownable {
     function setDefaultSwapFee(uint24 fee) external override onlyOwner {
         if (fee > MAX_SWAP_FEE) revert InvalidFee();
         defaultSwapFee = fee;
-        emit UpdateDefaultSwapFeeVolatile(fee);
+        emit UpdateDefaultSwapFee(fee);
     }
 
     function setCustomSwapFee(address pool, uint24 fee) external override onlyOwner {
-        if (customSwapFee > MAX_SWAP_FEE) revert InvalidFee();
+        if (fee > MAX_SWAP_FEE) revert InvalidFee();
         customSwapFee[pool] = CustomSwapFee(true, fee);
-        emit UpdateCustomSwapFee(_pool, true, fee);
+        emit UpdateCustomSwapFee(pool, true, fee);
     }
 
     function removeCustomSwapFee(address pool) external override onlyOwner {

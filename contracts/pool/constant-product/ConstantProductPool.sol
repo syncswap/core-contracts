@@ -2,47 +2,32 @@
 
 pragma solidity ^0.8.0;
 
-import "./libraries/Lock.sol";
-import "./libraries/Math.sol";
-import "./libraries/TransferHelper.sol";
-import "./interfaces/IWETH.sol";
-import "./interfaces/IStablePool.sol";
-import "./interfaces/IERC20.sol";
-import "./interfaces/IVault.sol";
-import "./interfaces/IBasePoolFactory.sol";
-import "./interfaces/ISyncSwapCallback.sol";
-import "./SyncSwapERC20.sol";
+import "../../libraries/Lock.sol";
+import "../../libraries/Math.sol";
+
+import "../../interfaces/IConstantProductPool.sol";
+import "../../interfaces/IVault.sol";
+import "../../interfaces/IBasePoolFactory.sol";
+
+import "../SyncSwapLPToken.sol";
 
 error InsufficientInputAmount();
 error InsufficientLiquidityMinted();
 
-contract StablePool is IStablePool, SyncSwapERC20, Lock {
+contract ConstantProductPool is IConstantProductPool, SyncSwapLPToken, Lock {
     using Math for uint;
 
     uint private constant MINIMUM_LIQUIDITY = 1000;
-    uint private constant MAX_LOOP_LIMIT = 256;
     uint private constant MAX_FEE = 1e5; /// @dev 100%.
 
-    /// @dev Pool type `2` for stable pools.
-    uint16 public constant poolType = 2;
+    /// @dev Pool type `1` for constant product pools.
+    uint24 public constant poolType = 1;
 
     address public immutable override factory;
-    address public immutable vault;
+    address private immutable vault;
 
     address public immutable override token0;
     address public immutable override token1;
-
-    /// @dev Amplification coefficient chosen from fluctuation of prices around 1 = 1.
-    uint private constant override A = 400000;
-    uint private constant N_A = 800000; /// @dev 2 * A.
-
-    /// @dev Multipliers for each pooled token's precision to get to the pool precision decimals
-    /// which is agnostic to the pool, but usually is 18.
-    /// For example, TBTC has 18 decimals, so the multiplier should be 10 ** (18 - 18) = 1.
-    /// WBTC has 8, so the multiplier should be 10 ** (18 - 8) => 10 ** 10.
-    /// The value is only for stable pools, and has no effects on non-stable pools.
-    uint public immutable override token0PrecisionMultiplier;
-    uint public immutable override token1PrecisionMultiplier;
 
     /// @dev Pool reserve of each pool token as of immediately after the most recent balance event.
     /// The value is used to measure growth in invariant on mints and input tokens on swaps.
@@ -58,9 +43,15 @@ contract StablePool is IStablePool, SyncSwapERC20, Lock {
     constructor() {
         factory = msg.sender;
         vault = IBasePoolFactory(msg.sender).vault();
-        
+
         (bytes memory _deployData) = IBasePoolFactory(msg.sender).getDeployData();
-        (token0, token1, token0PrecisionMultiplier, token1PrecisionMultiplier) = abi.decode(_deployData, (address, address, uint, uint));
+        (token0, token1) = abi.decode(_deployData, (address, address));
+    }
+
+    function getAssets() external view override returns (address[] memory assets) {
+        assets = new address[](2);
+        assets[0] = token0;
+        assets[1] = token1;
     }
 
     /// @dev Mints LP tokens - should be called via the router after transferring pool tokens.
@@ -333,23 +324,11 @@ contract StablePool is IStablePool, SyncSwapERC20, Lock {
         if (_amountIn == 0) {
             _dy = 0;
         } else {
-            unchecked {
-                uint _adjustedReserve0 = _reserve0 * token0PrecisionMultiplier;
-                uint _adjustedReserve1 = _reserve1 * token1PrecisionMultiplier;
-                uint _feeDeductedAmountIn = _amountIn - (_amountIn * _getSwapFee()) / MAX_FEE;
-                uint _d = _computeDFromAdjustedBalances(_adjustedReserve0, _adjustedReserve1);
-
-                if (_token0In) {
-                    uint _x = _adjustedReserve0 + (_feeDeductedAmountIn * token0PrecisionMultiplier);
-                    uint _y = _getY(_x, _d);
-                    _dy = _adjustedReserve1 - _y - 1;
-                    _dy /= token1PrecisionMultiplier;
-                } else {
-                    uint _x = _adjustedReserve1 + (_feeDeductedAmountIn * token1PrecisionMultiplier);
-                    uint _y = _getY(_x, _d);
-                    _dy = _adjustedReserve0 - _y - 1;
-                    _dy /= token0PrecisionMultiplier;
-                }
+            uint _amountInWithFee = _amountIn * (MAX_FEE - _getSwapFee());
+            if (_token0In) {
+                _dy = (_amountInWithFee * _reserve1) / (_reserve0 * MAX_FEE + _amountInWithFee);
+            } else {
+                _dy = (_amountInWithFee * _reserve0) / (_reserve1 * MAX_FEE + _amountInWithFee);
             }
         }
     }
@@ -363,90 +342,15 @@ contract StablePool is IStablePool, SyncSwapERC20, Lock {
         if (_amountOut == 0) {
             _dx = 0;
         } else {
-            unchecked {
-                uint _adjustedReserve0 = _reserve0 * token0PrecisionMultiplier;
-                uint _adjustedReserve1 = _reserve1 * token1PrecisionMultiplier;
-                uint _d = _computeDFromAdjustedBalances(_adjustedReserve0, _adjustedReserve1);
-
-                if (_token0Out) {
-                    uint _y = _adjustedReserve0 - _amountOut;
-                    if (_y <= 1) {
-                        return 1;
-                    }
-                    uint _x = _getY(_y, _d);
-                    _dx = MAX_FEE * (_x - _adjustedReserve1) / (MAX_FEE - _getSwapFee()) + 1;
-                    _dx /= token1PrecisionMultiplier;
-                } else {
-                    uint _y = _adjustedReserve1 - _amountOut;
-                    if (_y <= 1) {
-                        return 1;
-                    }
-                    uint _x = _getY(_y, _d);
-                    _dx = MAX_FEE * (_x - _adjustedReserve0) / (MAX_FEE - _getSwapFee()) + 1;
-                    _dx /= token0PrecisionMultiplier;
-                }
+            if (_token0Out) {
+                _dx = (_reserve1 * _amountOut * MAX_FEE) / ((_reserve0 - _amountOut) * (MAX_FEE - _getSwapFee())) + 1;
+            } else {
+                _dx = (_reserve0 * _amountOut * MAX_FEE) / ((_reserve1 - _amountOut) * (MAX_FEE - _getSwapFee())) + 1;
             }
         }
     }
 
-    /// @notice Calculate the new balances of the tokens given the indexes of the token
-    /// that is swapped from (FROM) and the token that is swapped to (TO).
-    /// This function is used as a helper function to calculate how much TO token
-    /// the user should receive on swap.
-    /// @dev Originally https://github.com/saddle-finance/saddle-contract/blob/0b76f7fb519e34b878aa1d58cffc8d8dc0572c12/contracts/SwapUtils.sol#L432.
-    /// @param x The new total amount of FROM token.
-    /// @return y The amount of TO token that should remain in the pool.
-    function _getY(uint x, uint _d) private view returns (uint y) {
-        uint c = (_d * _d) / (x * 2);
-        c = (c * _d) / (N_A * 2);
-        uint b = x + (_d / N_A);
-        uint yPrev;
-        y = _d;
-        /// @dev Iterative approximation.
-        for (uint i; i < MAX_LOOP_LIMIT; ) {
-            yPrev = y;
-            y = (y * y + c) / (y * 2 + b - _d);
-            if (y.within1(yPrev)) {
-                break;
-            }
-            unchecked {
-                ++i;
-            }
-        }
-    }
-
-    function _computeInvariant(uint _reserve0, uint _reserve1) private view returns (uint _invariant) {
-        /// @dev Get D, the StableSwap invariant, based on a set of balances and a particular A.
-        /// See the StableSwap paper for details.
-        /// Originally https://github.com/saddle-finance/saddle-contract/blob/0b76f7fb519e34b878aa1d58cffc8d8dc0572c12/contracts/SwapUtils.sol#L319.
-        /// Returns the invariant, at the precision of the pool.
-        unchecked {
-            uint _adjustedReserve0 = _reserve0 * token0PrecisionMultiplier;
-            uint _adjustedReserve1 = _reserve1 * token1PrecisionMultiplier;
-            _invariant = _computeDFromAdjustedBalances(_adjustedReserve0, _adjustedReserve1);
-        }
-    }
-
-    function _computeDFromAdjustedBalances(uint _xp0, uint _xp1) private view returns (uint _computed) {
-        uint _s = _xp0 + _xp1;
-
-        if (_s == 0) {
-            _computed = 0;
-        } else {
-            uint _prevD;
-            uint _d = _s;
-            for (uint i; i < MAX_LOOP_LIMIT; ) {
-                uint _dP = (((_d * _d) / _xp0) * _d) / _xp1 / 4;
-                _prevD = _d;
-                _d = (((N_A * _s) + 2 * _dP) * _d) / ((N_A - 1) * _d + 3 * _dP);
-                if (_d.within1(_prevD)) {
-                    break;
-                }
-                unchecked {
-                    ++i;
-                }
-            }
-            _computed = _d;
-        }
+    function _computeInvariant(uint _reserve0, uint _reserve1) private pure returns (uint _invariant) {
+        _invariant = (_reserve0 * _reserve1).sqrt();
     }
 }

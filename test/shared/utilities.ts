@@ -32,7 +32,7 @@ export async function getPermitSignature(
     deadline: BigNumber
 ): Promise<string> {
     const domain = {
-        name: 'SyncSwap SLP Token',
+        name: 'SyncSwap LP Token',
         version: '1',
         chainId: 280,
         verifyingContract: token.address

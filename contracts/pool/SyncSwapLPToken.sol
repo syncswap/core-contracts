@@ -2,8 +2,11 @@
 
 pragma solidity ^0.8.0;
 
-import "./libraries/SignatureChecker.sol";
-import "./interfaces/IERC20Permit2.sol";
+import "../libraries/SignatureChecker.sol";
+
+import "../interfaces/IERC20Permit2.sol";
+
+error Expired();
 
 /**
  * @dev A simple ERC20 implementation for pool's liquidity token, supports permit by both ECDSA signatures from
@@ -12,9 +15,9 @@ import "./interfaces/IERC20Permit2.sol";
  * Based on Solmate's ERC20.
  * https://github.com/transmissions11/solmate/blob/bff24e835192470ed38bf15dbed6084c2d723ace/src/tokens/ERC20.sol
  */
-contract SyncSwapERC20 is IERC20Permit2 {
-    string public constant override name = "SyncSwap SLP Token";
-    string public constant override symbol = "SLP";
+contract SyncSwapLPToken is IERC20Permit2 {
+    string public constant override name = "SyncSwap LP Token";
+    string public constant override symbol = "SSLP";
     uint8 public immutable override decimals = 18;
 
     uint public override totalSupply;
@@ -29,9 +32,9 @@ contract SyncSwapERC20 is IERC20Permit2 {
         domainSeparator = keccak256(
             abi.encode(
                 0x8b73c3c69bb8fe3d512ecc4cf759cc79239f7b179b0ffacaa9a75d522b39400f, // keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")
-                0xf217daa25f50651e072a913278858c2bfea9576ad0ab9d0a2cd31744cea22cbe, // keccak256(bytes("SyncSwap SLP Token"))
+                0x125767caed758c30726816e62c5b217c6b2b9320c3afbe187788f2fe0d76e810, // keccak256(bytes("SyncSwap LP Token"))
                 0xc89efdaa54c0f20c7adf612882df0950f5a951637e0307cdcb4c672f298b8bc6, // keccak256(bytes("1"))
-                280, // TESTNET
+                block.chainid,
                 address(this)
             )
         );
@@ -99,7 +102,9 @@ contract SyncSwapERC20 is IERC20Permit2 {
 
     modifier ensures(uint _deadline) {
         // solhint-disable-next-line not-rely-on-time
-        require(_deadline >= block.timestamp, "X"); // EXPIRED
+        if (block.timestamp > _deadline) {
+            revert Expired();
+        }
         _;
     }
 
