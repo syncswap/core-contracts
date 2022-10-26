@@ -9,7 +9,7 @@ import "./interfaces/IWETH.sol";
 import "./interfaces/IStablePool.sol";
 import "./interfaces/IERC20.sol";
 import "./interfaces/IVault.sol";
-import "./interfaces/ISyncSwapFactory.sol";
+import "./interfaces/IBasePoolFactory.sol";
 import "./interfaces/ISyncSwapCallback.sol";
 import "./SyncSwapERC20.sol";
 
@@ -57,9 +57,9 @@ contract StablePool is IStablePool, SyncSwapERC20, Lock {
     /// @dev Factory must ensures that the parameters are valid.
     constructor() {
         factory = msg.sender;
-        vault = ISyncSwapFactory(msg.sender).vault();
+        vault = IBasePoolFactory(msg.sender).vault();
         
-        (bytes memory _deployData) = ISyncSwapFactory(msg.sender).getDeployData();
+        (bytes memory _deployData) = IBasePoolFactory(msg.sender).getDeployData();
         (token0, token1, token0PrecisionMultiplier, token1PrecisionMultiplier) = abi.decode(_deployData, (address, address, uint, uint));
     }
 
@@ -259,7 +259,7 @@ contract StablePool is IStablePool, SyncSwapERC20, Lock {
     }
 
     function _getSwapFee() private view returns (uint24 _swapFee) {
-        _swapFee = ISyncSwapFactory(factory).getSwapFee(address(this));
+        _swapFee = IBasePoolFactory(factory).getSwapFee(address(this));
     }
 
     /// @dev This fee is charged to cover for the swap fee when users add unbalanced liquidity.
@@ -285,7 +285,7 @@ contract StablePool is IStablePool, SyncSwapERC20, Lock {
         _totalSupply = totalSupply;
         _invariant = _computeInvariant(_reserve0, _reserve1);
 
-        address _feeRecipient = ISyncSwapFactory(factory).feeRecipient();
+        address _feeRecipient = IBasePoolFactory(factory).feeRecipient();
         _feeOn = (_feeRecipient != address(0));
 
         uint _invariantLast = invariantLast;
@@ -293,7 +293,7 @@ contract StablePool is IStablePool, SyncSwapERC20, Lock {
             if (_feeOn) {
                 if (_invariant > _invariantLast) {
                     /// @dev Mints `protocolFee` % of growth in liquidity (invariant).
-                    uint _protocolFee = ISyncSwapFactory(factory).protocolFee();
+                    uint _protocolFee = IBasePoolFactory(factory).protocolFee();
                     uint _numerator = _totalSupply * (_invariant - _invariantLast) * _protocolFee;
                     uint _denominator = (MAX_FEE - _protocolFee) * _invariant + _protocolFee * _invariantLast;
                     uint _liquidity = _numerator / _denominator;

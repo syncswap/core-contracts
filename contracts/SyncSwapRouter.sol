@@ -38,6 +38,7 @@ contract SyncSwapRouter is ISyncSwapRouter {
         assert(msg.sender == wETH); // only accept ETH via fallback from the WETH contract
     }
 
+    /*
     function _getPool(address tokenA, address tokenB, bool stable) private view returns (address pool) {
         pool = ISyncSwapFactory(factory).getPool(tokenA, tokenB, stable);
     }
@@ -50,6 +51,7 @@ contract SyncSwapRouter is ISyncSwapRouter {
             pool = ISyncSwapFactory(factory).createPool(tokenA, tokenB, stable);
         }
     }
+    */
 
     // Add Liquidity
     /*
