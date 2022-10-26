@@ -2,6 +2,12 @@
 
 pragma solidity ^0.8.0;
 
+// TODO
+error SafeApproveFailed();
+error SafeTransferFailed();
+error SafeTransferFromFailed();
+error SafeTransferETHFailed();
+
 /// @dev Helper methods for interacting with ERC20 tokens and sending ETH that do not consistently return true / false.
 library TransferHelper {
     function safeApprove(
@@ -12,6 +18,7 @@ library TransferHelper {
         // bytes4(keccak256(bytes("approve(address,uint256)")));
         // solhint-disable-next-line avoid-low-level-calls
         (bool success, bytes memory data) = token.call(abi.encodeWithSelector(0x095ea7b3, to, value));
+
         require(
             success && (data.length == 0 || abi.decode(data, (bool))),
             "Y"

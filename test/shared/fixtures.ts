@@ -7,36 +7,11 @@ import { SignerWithAddress } from '@nomiclabs/hardhat-ethers/signers';
 const hre: HardhatRuntimeEnvironment = require("hardhat");
 const ethers: HardhatEthersHelpers = require("hardhat").ethers;
 
-interface FactoryFixture {
-    factory: Contract;
-    swapFeeProvider: Contract;
-}
-
-/*
-const overrides = {
-    gasLimit: 9999999
-}
-*/
-
-async function deployFactory(feeRecipient: string, swapFeeProvider: string): Promise<Contract> {
+export async function deployFactory(feeRecipient: string): Promise<Contract> {
     const contractFactory = await ethers.getContractFactory('SyncSwapFactory');
-    const contract = await contractFactory.deploy(feeRecipient, swapFeeProvider);
+    const contract = await contractFactory.deploy(feeRecipient);
     await contract.deployed();
     return contract;
-}
-
-async function deploySimpleSwapFeeProvider(factory: string): Promise<Contract> {
-    const contractFactory = await ethers.getContractFactory('SimpleSwapFeeProvider');
-    const contract = await contractFactory.deploy(factory);
-    await contract.deployed();
-    return contract;
-}
-
-export async function factoryFixture(feeRecipient: string): Promise<FactoryFixture> {
-    const factory = await deployFactory(feeRecipient, ZERO_ADDRESS);
-    const swapFeeProvider = await deploySimpleSwapFeeProvider(factory.address);
-    await factory.setSwapFeeProvider(swapFeeProvider.address);
-    return { factory, swapFeeProvider };
 }
 
 export async function deploySyncSwapERC20(totalSupply: BigNumber): Promise<Contract> {
@@ -46,34 +21,34 @@ export async function deploySyncSwapERC20(totalSupply: BigNumber): Promise<Contr
     return contract;
 }
 
-interface PairFixture extends FactoryFixture {
+interface PairFixture {
+    factory: Contract;
     token0: Contract;
     token1: Contract;
     volatilePair: Contract;
     stablePair: Contract;
 }
 
-export async function pairFixture(wallet: SignerWithAddress): Promise<PairFixture> {
-    const accounts = await ethers.getSigners();
-    const { factory, swapFeeProvider } = await factoryFixture(accounts[1].address);
+export async function pairFixture(wallet: SignerWithAddress, feeRecipient: SignerWithAddress): Promise<PairFixture> {
+    const factory = await deployFactory(feeRecipient.address);
 
-    const tokenA = await deploySyncSwapERC20(expandTo18Decimals(10000));
-    const tokenB = await deploySyncSwapERC20(expandTo18Decimals(10000));
+    const tokenA = await deploySyncSwapERC20(expandTo18Decimals('100000000000000000000'));
+    const tokenB = await deploySyncSwapERC20(expandTo18Decimals('100000000000000000000'));
 
-    await factory.createPair(tokenA.address, tokenB.address, true);
-    await factory.createPair(tokenA.address, tokenB.address, false);
+    await factory.createPool(tokenA.address, tokenB.address, true);
+    await factory.createPool(tokenA.address, tokenB.address, false);
 
     const pairArtifact = await hre.artifacts.readArtifact('SyncSwapPool');
 
-    const stablePairAddress = await factory.getPair(tokenA.address, tokenB.address, true);
+    const stablePairAddress = await factory.getPool(tokenA.address, tokenB.address, true);
     const stablePair = new Contract(stablePairAddress, pairArtifact.abi, ethers.provider).connect(wallet);
 
-    const volatilePairAddress = await factory.getPair(tokenA.address, tokenB.address, false);
+    const volatilePairAddress = await factory.getPool(tokenA.address, tokenB.address, false);
     const volatilePair = new Contract(volatilePairAddress, pairArtifact.abi, ethers.provider).connect(wallet);
 
     const [token0, token1] = Number(tokenA.address) < Number(tokenB.address) ? [tokenA, tokenB] : [tokenB, tokenA];
 
-    return { factory, swapFeeProvider, token0, token1, stablePair, volatilePair };
+    return { factory, token0, token1, stablePair, volatilePair };
 }
 
 interface V2Fixture {
@@ -82,7 +57,6 @@ interface V2Fixture {
     WETH: Contract;
     WETHPartner: Contract;
     factory: Contract;
-    swapFeeProvider: Contract;
     router: Contract;
     routerEventEmitter: Contract;
     pair: Contract;
@@ -135,7 +109,7 @@ export async function v2Fixture(): Promise<V2Fixture> {
     const WETHPartner = await deployTestERC20(expandTo18Decimals(10000));
 
     // deploy V2
-    const { factory, swapFeeProvider } = await factoryFixture(accounts[1].address);
+    const { factory } = await deployFactory(accounts[1].address);
 
     // deploy routers
     const router = await deployRouter(factory.address, WETH.address);
@@ -144,15 +118,15 @@ export async function v2Fixture(): Promise<V2Fixture> {
     const routerEventEmitter = await deployRouterEventEmitter(factory.address, WETH.address);
 
     // initialize
-    await factory.createPair(tokenA.address, tokenB.address, false);
-    const pairAddress = await factory.getPair(tokenA.address, tokenB.address, false);
+    await factory.createPool(tokenA.address, tokenB.address, false);
+    const pairAddress = await factory.getPool(tokenA.address, tokenB.address, false);
     const pairArtifact = await hre.artifacts.readArtifact('SyncSwapPool');;
     const pair = new Contract(pairAddress, pairArtifact.abi, ethers.provider).connect(wallet);
 
     const [token0, token1] = Number(tokenA.address) < Number(tokenB.address) ? [tokenA, tokenB] : [tokenB, tokenA];
 
-    await factory.createPair(WETH.address, WETHPartner.address, false);
-    const WETHPairAddress = await factory.getPair(WETH.address, WETHPartner.address, false);
+    await factory.createPool(WETH.address, WETHPartner.address, false);
+    const WETHPairAddress = await factory.getPool(WETH.address, WETHPartner.address, false);
     const WETHPair = new Contract(WETHPairAddress, pairArtifact.abi, ethers.provider).connect(wallet);
 
     return {
@@ -161,7 +135,6 @@ export async function v2Fixture(): Promise<V2Fixture> {
         WETH,
         WETHPartner,
         factory,
-        swapFeeProvider,
         router,
         routerEventEmitter,
         pair,

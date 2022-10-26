@@ -11,12 +11,12 @@ const hre = require("hardhat");
 
 const DECIMALS_BASE_18 = BigNumber.from(10).pow(18);
 
-export const MINIMUM_LIQUIDITY = BigNumber.from(1000)
-export const MAX_UINT256 = BigNumber.from(2).pow(256).sub(1)
-export const ZERO = BigNumber.from(0)
-export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
+export const MINIMUM_LIQUIDITY = BigNumber.from(1000);
+export const MAX_UINT256 = BigNumber.from(2).pow(256).sub(1);
+export const ZERO = BigNumber.from(0);
+export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
-export function expandTo18Decimals(n: number): BigNumber {
+export function expandTo18Decimals(n: number | string): BigNumber {
     return BigNumber.from(n).mul(DECIMALS_BASE_18)
 }
 

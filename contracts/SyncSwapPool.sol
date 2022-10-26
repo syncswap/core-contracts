@@ -5,14 +5,18 @@ pragma solidity ^0.8.0;
 import "./libraries/Lock.sol";
 import "./libraries/Math.sol";
 import "./libraries/TransferHelper.sol";
-import "./interfaces/ISyncSwapPool.sol";
+import "./interfaces/IWETH.sol";
+import "./interfaces/IBasePool.sol";
 import "./interfaces/IERC20.sol";
+import "./interfaces/IVault.sol";
 import "./interfaces/ISyncSwapFactory.sol";
 import "./interfaces/ISyncSwapCallback.sol";
 import "./SyncSwapERC20.sol";
-import "./SyncSwapLibrary.sol";
 
-contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
+error InsufficientInputAmount();
+error InsufficientLiquidityMinted();
+
+contract SyncSwapPool is IBasePool, SyncSwapERC20, Lock {
     using Math for uint;
 
     uint private constant MINIMUM_LIQUIDITY = 1000;
@@ -22,12 +26,11 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
     address public immutable override factory;
     address public immutable override token0;
     address public immutable override token1;
-    /// @dev Whether the pool is stable, determines the invariant to use (either x*y=k or hybrid).
-    bool public immutable override stable;
+    address public immutable vault;
 
     /// @dev Amplification coefficient chosen from fluctuation of prices around 1 = 1.
-    /// The value is only for stable pools, and has no effects on non-stable pools.
-    uint public A;
+    /// The value also determines whether the pool is using the StableSwap invariant (when A != 0).
+    uint public override A;
     uint private N_A; /// @dev 2 * A.
 
     /// @dev Multipliers for each pooled token's precision to get to the pool precision decimals
@@ -45,25 +48,24 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
     /// @dev Invariant of the pool as of immediately after the most recent liquidity event.
     /// The value is used to measure growth in invariant when protocol fee is enabled,
     /// and will be reset to zero if protocol fee is disabled.
-    uint private invariantLast;
+    uint public override invariantLast;
 
     /// @dev Factory must ensures that the parameters are valid.
-    constructor(address _token0, address _token1, uint _a, uint _token0PrecisionMultiplier, uint _token1PrecisionMultiplier) {
+    constructor(address _vault, address _token0, address _token1, uint _a, uint _token0PrecisionMultiplier, uint _token1PrecisionMultiplier) {
         factory = msg.sender;
         token0 = _token0;
         token1 = _token1;
-        if (_a != 0) {
-            stable = true;
-            A = _a;
-            N_A = 2 * _a;
-            token0PrecisionMultiplier = _token0PrecisionMultiplier;
-            token1PrecisionMultiplier = _token1PrecisionMultiplier;
-        }
+        vault = _vault;
+        A = _a;
+        N_A = 2 * _a;
+        token0PrecisionMultiplier = _token0PrecisionMultiplier;
+        token1PrecisionMultiplier = _token1PrecisionMultiplier;
     }
 
     /// @dev Mints LP tokens - should be called via the router after transferring pool tokens.
     /// The router should ensure that sufficient LP tokens are minted.
-    function mint(address _to) external override lock returns (uint _liquidity) {
+    function mint(bytes calldata _data) external override lock returns (uint _liquidity) {
+        address _to = abi.decode(_data, (address));
         (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
         (uint _balance0, uint _balance1) = _balances();
 
@@ -72,11 +74,14 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
         uint _amount1 = _balance1 - _reserve1;
         //require(_amount0 != 0 && _amount1 != 0); // unchecked to save gas as not necessary
 
+        {
         // Adds mint fee to reserves (applies to invariant increase) if unbalanced.
         (uint _fee0, uint _fee1) = _unbalancedMintFee(_amount0, _amount1, _reserve0, _reserve1);
         _reserve0 += _fee0;
         _reserve1 += _fee1;
+        }
 
+        {
         // Calculates old invariant (where unbalanced fee added to) and, mint protocol fee if any.
         (bool _feeOn, uint _totalSupply, uint _oldInvariant) = _mintProtocolFee(_reserve0, _reserve1);
 
@@ -89,7 +94,7 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
         }
 
         // Mints liquidity for recipient.
-        require(_liquidity != 0, "M"); // INSUFFICIENT_LIQUIDITY_MINTED
+        if (_liquidity == 0) revert InsufficientLiquidityMinted();
         _mint(_to, _liquidity);
 
         // Updates reserves and last invariant with new balances.
@@ -97,13 +102,15 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
         if (_feeOn) {
             invariantLast = _newInvariant;
         }
+        }
 
-        emit Mint(msg.sender, _amount0, _amount1, _to, _liquidity);
+        emit Mint(msg.sender, _amount0, _amount1, _liquidity, _to);
     }
 
     /// @dev Burns LP tokens sent to this contract.
     /// The router should ensure that sufficient pool tokens are received.
-    function burn(address _to) external override lock returns (uint _amount0, uint _amount1) {
+    function burn(bytes calldata _data) external override lock returns (TokenAmount[] memory _amounts) {
+        (address _to, bool _withdraw) = abi.decode(_data, (address, bool));
         (uint _balance0, uint _balance1) = _balances();
         uint _liquidity = balanceOf[address(this)];
 
@@ -112,14 +119,14 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
         (bool _feeOn, uint _totalSupply, ) = _mintProtocolFee(_balance0, _balance1);
 
         // Calculates amounts of pool tokens proportional to balances.
-        _amount0 = _liquidity * _balance0 / _totalSupply;
-        _amount1 = _liquidity * _balance1 / _totalSupply;
+        uint _amount0 = _liquidity * _balance0 / _totalSupply;
+        uint _amount1 = _liquidity * _balance1 / _totalSupply;
         //require(_amount0 != 0 || _amount1 != 0); // unchecked to save gas, should be done through router.
 
         // Burns liquidity and transfers pool tokens.
         _burn(address(this), _liquidity);
-        TransferHelper.safeTransfer(token0, _to, _amount0);
-        TransferHelper.safeTransfer(token1, _to, _amount1);
+        _transferTokens(token0, _to, _amount0, _withdraw);
+        _transferTokens(token1, _to, _amount1, _withdraw);
 
         // Update reserves and last invariant with up-to-date balances (after transfers).
         /// @dev Using counterfactuals balances here to save gas.
@@ -133,13 +140,18 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
             invariantLast = _computeInvariant(_balance0, _balance1);
         }
 
-        emit Burn(msg.sender, _amount0, _amount1, _to, _liquidity);
+        _amounts = new TokenAmount[](2);
+        _amounts[0] = TokenAmount(token0, _amount0);
+        _amounts[1] = TokenAmount(token1, _amount1);
+
+        emit Burn(msg.sender, _amount0, _amount1, _liquidity, _to);
     }
 
     /// @dev Burns LP tokens sent to this contract and swaps one of the output tokens for another
     /// - i.e., the user gets a single token out by burning LP tokens.
     /// The router should ensure that sufficient pool tokens are received.
-    function burnSingle(address _tokenOut, address _to) external override lock returns (uint _amountOut) {
+    function burnSingle(bytes calldata _data) external override lock returns (uint _amountOut) {
+        (address _tokenOut, address _to, bool _withdraw) = abi.decode(_data, (address, address, bool));
         (uint _balance0, uint _balance1) = _balances();
         uint _liquidity = balanceOf[address(this)];
 
@@ -158,7 +170,7 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
         if (_tokenOut == token1) {
             // Swap `token0` for `token1`.
             _amount1 += _getAmountOut(_amount0, _balance0 - _amount0, _balance1 - _amount1, true);
-            TransferHelper.safeTransfer(token1, _to, _amount1);
+            _transferTokens(token1, _to, _amount1, _withdraw);
             _amountOut = _amount1;
             _amount0 = 0;
             _balance1 -= _amount1;
@@ -167,7 +179,7 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
             // Swap `token1` for `token0`.
             require(_tokenOut == token0); // ensures to prevent from messing up the pool with bad parameters.
             _amount0 += _getAmountOut(_amount1, _balance0 - _amount0, _balance1 - _amount1, false);
-            TransferHelper.safeTransfer(token0, _to, _amount0);
+            _transferTokens(token0, _to, _amount0, _withdraw);
             _amountOut = _amount0;
             _amount1 = 0;
             _balance0 -= _amount0;
@@ -180,12 +192,13 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
             invariantLast = _computeInvariant(_balance0, _balance1);
         }
 
-        emit Burn(msg.sender, _amount0, _amount1, _to, _liquidity);
+        emit Burn(msg.sender, _amount0, _amount1, _liquidity, _to);
     }
 
     /// @dev Swaps one token for another - should be called via the router after transferring input tokens.
     /// The router should ensure that sufficient output tokens are received.
-    function swap(address _tokenIn, address _to) external override lock returns (uint _amountOut) {
+    function swap(bytes calldata _data) external override lock returns (uint _amountOut) {
+        (address _tokenIn, address _to, bool _withdraw) = abi.decode(_data, (address, address, bool));
         (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
         (uint _balance0, uint _balance1) = _balances();
 
@@ -216,59 +229,77 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
         }
 
         // Transfers output tokens.
-        TransferHelper.safeTransfer(_tokenOut, _to, _amountOut);
+        _transferTokens(_tokenOut, _to, _amountOut, _withdraw);
 
         // Update reserves with up-to-date balances (updated above).
         /// @dev Using counterfactuals balances here to save gas.
         _updateReserves(_balance0, _balance1);
     }
 
+    /*
     /// @dev Swaps one token for another with callback.
     /// The router / caller must transfers sufficient input tokens before calling or during the callback.
-    function flashSwap(uint _amountOut0, uint _amountOut1, address _to, bytes calldata _data) external lock returns (uint _amountIn0, uint _amountIn1) {
+    function flashSwap(bytes calldata _data) external lock returns (uint _amountIn0, uint _amountIn1) {
+        (uint _amountOut0, uint _amountOut1, address _to, bool _withdraw, bytes memory _context) = abi.decode(
+            _data,
+            (uint, uint, address, bytes)
+        );
         (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
-        //(uint _balance0, uint _balance1) = _balances();
 
         // Transfers output tokens optimistically, and calculates input tokens required.
         if (_amountOut0 != 0) {
-            TransferHelper.safeTransfer(token0, _to, _amountOut0);
+            _transferTokens(token0, _to, _amountOut0, _withdraw);
             _amountIn1 = _getAmountIn(_amountOut0, _reserve0, _reserve1, true);
         }
         if (_amountOut1 != 0) {
-            TransferHelper.safeTransfer(token1, _to, _amountOut1);
+            _transferTokens(token1, _to, _amountOut1, _withdraw);
             _amountIn0 = _getAmountIn(_amountOut1, _reserve0, _reserve1, false);
         }
 
-        // Calls the callback with amounts if has data.
-        if (_data.length != 0) {
-            ISyncSwapCallback(msg.sender).syncSwapCallback(_amountIn0, _amountIn1, _amountOut0, _amountOut1, _data);
+        // Calls the callback with amounts if has context.
+        if (_context.length != 0) {
+            ISyncSwapCallback(msg.sender).syncSwapCallback(_amountIn0, _amountIn1, _amountOut0, _amountOut1, _to, _context);
         }
 
         // Ensures required input tokens are received.
-        /// @dev Excessive inputs are ignored.
         (uint _balance0, uint _balance1) = _balances();
+        {
         uint _actualAmountIn0 = _balance0 > (_reserve0 - _amountOut0) ? _balance0 - (_reserve0 - _amountOut0) : 0;
         uint _actualAmountIn1 = _balance1 > (_reserve1 - _amountOut1) ? _balance1 - (_reserve1 - _amountOut1) : 0;
-        require(_actualAmountIn0 >= _amountIn0 && _actualAmountIn1 >= _amountIn1, "IAI"); // INSUFFICIENT_AMOUNT_IN
+        /// @dev Excessive inputs are ignored.
+        if (_actualAmountIn0 < _amountIn0) revert InsufficientInputAmount();
+        if (_actualAmountIn1 < _amountIn1) revert InsufficientInputAmount();
+        }
 
         // Updates reserves with new balances.
         _updateReserves(_balance0, _balance1);
 
         emit Swap(msg.sender, _amountIn0, _amountIn1, _amountOut0, _amountOut1, _to);
     }
+    */
 
     function _updateReserves(uint _balance0, uint _balance1) private {
         (reserve0, reserve1) = (_balance0, _balance1);
         emit Sync(_balance0, _balance1);
     }
 
-    function _balances() private view returns (uint _balance0, uint _balance1) {
-        _balance0 = IERC20(token0).balanceOf(address(this));
-        _balance1 = IERC20(token1).balanceOf(address(this));
+    function _transferTokens(address token, address to, uint amount, bool withdraw) private {
+        if (withdraw) {
+            IVault(vault).withdraw(token, to, amount);
+        } else {
+            IVault(vault).transfer(token, to, amount);
+        }
     }
 
-    function _getSwapFee() private view returns (uint16 _swapFee) {
-        _swapFee = ISyncSwapFactory(factory).getSwapFee(address(this), msg.sender);
+    function _balances() private view returns (uint balance0, uint balance1) {
+        //_balance0 = IERC20(token0).balanceOf(address(this));
+        //_balance1 = IERC20(token1).balanceOf(address(this));
+        balance0 = IVault(vault).balanceOf(token0, address(this));
+        balance1 = IVault(vault).balanceOf(token1, address(this));
+    }
+
+    function _getSwapFee() private view returns (uint24 _swapFee) {
+        _swapFee = ISyncSwapFactory(factory).getSwapFee(address(this));
     }
 
     /// @dev This fee is charged to cover for the swap fee when users add unbalanced liquidity.
@@ -319,6 +350,10 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
         }
     }
 
+    function getReserves() external view override returns (uint _reserve0, uint _reserve1) {
+        (_reserve0, _reserve1) = (reserve0, reserve1);
+    }
+
     function getAmountOut(address _tokenIn, uint _amountIn) external view override returns (uint _finalAmountOut) {
         (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
         _finalAmountOut = _getAmountOut(_amountIn, _reserve0, _reserve1, _tokenIn == token0);
@@ -335,31 +370,35 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
         uint _reserve1,
         bool _token0In
     ) private view returns (uint _dy) {
-        if (stable) {
-            unchecked {
-                uint _adjustedReserve0 = _reserve0 * token0PrecisionMultiplier;
-                uint _adjustedReserve1 = _reserve1 * token1PrecisionMultiplier;
-                uint _feeDeductedAmountIn = _amountIn - (_amountIn * _getSwapFee()) / MAX_FEE;
-                uint _d = _computeDFromAdjustedBalances(_adjustedReserve0, _adjustedReserve1);
-
-                if (_token0In) {
-                    uint _x = _adjustedReserve0 + (_feeDeductedAmountIn * token0PrecisionMultiplier);
-                    uint _y = _getY(_x, _d);
-                    _dy = _adjustedReserve1 - _y - 1;
-                    _dy /= token1PrecisionMultiplier;
-                } else {
-                    uint _x = _adjustedReserve1 + (_feeDeductedAmountIn * token1PrecisionMultiplier);
-                    uint _y = _getY(_x, _d);
-                    _dy = _adjustedReserve0 - _y - 1;
-                    _dy /= token0PrecisionMultiplier;
-                }
-            }
+        if (_amountIn == 0) {
+            _dy = 0;
         } else {
-            uint _amountInWithFee = _amountIn * (MAX_FEE - _getSwapFee());
-            if (_token0In) {
-                _dy = (_amountInWithFee * _reserve1) / (_reserve0 * MAX_FEE + _amountInWithFee);
+            if (A != 0) {
+                unchecked {
+                    uint _adjustedReserve0 = _reserve0 * token0PrecisionMultiplier;
+                    uint _adjustedReserve1 = _reserve1 * token1PrecisionMultiplier;
+                    uint _feeDeductedAmountIn = _amountIn - (_amountIn * _getSwapFee()) / MAX_FEE;
+                    uint _d = _computeDFromAdjustedBalances(_adjustedReserve0, _adjustedReserve1);
+
+                    if (_token0In) {
+                        uint _x = _adjustedReserve0 + (_feeDeductedAmountIn * token0PrecisionMultiplier);
+                        uint _y = _getY(_x, _d);
+                        _dy = _adjustedReserve1 - _y - 1;
+                        _dy /= token1PrecisionMultiplier;
+                    } else {
+                        uint _x = _adjustedReserve1 + (_feeDeductedAmountIn * token1PrecisionMultiplier);
+                        uint _y = _getY(_x, _d);
+                        _dy = _adjustedReserve0 - _y - 1;
+                        _dy /= token0PrecisionMultiplier;
+                    }
+                }
             } else {
-                _dy = (_amountInWithFee * _reserve0) / (_reserve1 * MAX_FEE + _amountInWithFee);
+                uint _amountInWithFee = _amountIn * (MAX_FEE - _getSwapFee());
+                if (_token0In) {
+                    _dy = (_amountInWithFee * _reserve1) / (_reserve0 * MAX_FEE + _amountInWithFee);
+                } else {
+                    _dy = (_amountInWithFee * _reserve0) / (_reserve1 * MAX_FEE + _amountInWithFee);
+                }
             }
         }
     }
@@ -370,35 +409,39 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
         uint _reserve1,
         bool _token0Out
     ) private view returns (uint _dx) {
-        if (stable) {
-            unchecked {
-                uint _adjustedReserve0 = _reserve0 * token0PrecisionMultiplier;
-                uint _adjustedReserve1 = _reserve1 * token1PrecisionMultiplier;
-                uint _d = _computeDFromAdjustedBalances(_adjustedReserve0, _adjustedReserve1);
-
-                if (_token0Out) {
-                    uint _y = _adjustedReserve0 - _amountOut;
-                    if (_y <= 1) {
-                        return 1;
-                    }
-                    uint _x = _getY(_y, _d);
-                    _dx = MAX_FEE * (_x - _adjustedReserve1) / (MAX_FEE - _getSwapFee()) + 1;
-                    _dx /= token1PrecisionMultiplier;
-                } else {
-                    uint _y = _adjustedReserve1 - _amountOut;
-                    if (_y <= 1) {
-                        return 1;
-                    }
-                    uint _x = _getY(_y, _d);
-                    _dx = MAX_FEE * (_x - _adjustedReserve0) / (MAX_FEE - _getSwapFee()) + 1;
-                    _dx /= token0PrecisionMultiplier;
-                }
-            }
+        if (_amountOut == 0) {
+            _dx = 0;
         } else {
-            if (_token0Out) {
-                _dx = (_reserve1 * _amountOut * MAX_FEE) / ((_reserve0 - _amountOut) * (MAX_FEE - _getSwapFee())) + 1;
+            if (A != 0) {
+                unchecked {
+                    uint _adjustedReserve0 = _reserve0 * token0PrecisionMultiplier;
+                    uint _adjustedReserve1 = _reserve1 * token1PrecisionMultiplier;
+                    uint _d = _computeDFromAdjustedBalances(_adjustedReserve0, _adjustedReserve1);
+
+                    if (_token0Out) {
+                        uint _y = _adjustedReserve0 - _amountOut;
+                        if (_y <= 1) {
+                            return 1;
+                        }
+                        uint _x = _getY(_y, _d);
+                        _dx = MAX_FEE * (_x - _adjustedReserve1) / (MAX_FEE - _getSwapFee()) + 1;
+                        _dx /= token1PrecisionMultiplier;
+                    } else {
+                        uint _y = _adjustedReserve1 - _amountOut;
+                        if (_y <= 1) {
+                            return 1;
+                        }
+                        uint _x = _getY(_y, _d);
+                        _dx = MAX_FEE * (_x - _adjustedReserve0) / (MAX_FEE - _getSwapFee()) + 1;
+                        _dx /= token0PrecisionMultiplier;
+                    }
+                }
             } else {
-                _dx = (_reserve0 * _amountOut * MAX_FEE) / ((_reserve1 - _amountOut) * (MAX_FEE - _getSwapFee())) + 1;
+                if (_token0Out) {
+                    _dx = (_reserve1 * _amountOut * MAX_FEE) / ((_reserve0 - _amountOut) * (MAX_FEE - _getSwapFee())) + 1;
+                } else {
+                    _dx = (_reserve0 * _amountOut * MAX_FEE) / ((_reserve1 - _amountOut) * (MAX_FEE - _getSwapFee())) + 1;
+                }
             }
         }
     }
@@ -430,7 +473,7 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
     }
 
     function _computeInvariant(uint _reserve0, uint _reserve1) private view returns (uint _invariant) {
-        if (stable) {
+        if (A != 0) {
             /// @dev Get D, the StableSwap invariant, based on a set of balances and a particular A.
             /// See the StableSwap paper for details.
             /// Originally https://github.com/saddle-finance/saddle-contract/blob/0b76f7fb519e34b878aa1d58cffc8d8dc0572c12/contracts/SwapUtils.sol#L319.
@@ -467,115 +510,4 @@ contract SyncSwapPool is ISyncSwapPool, SyncSwapERC20, Lock {
             _computed = _d;
         }
     }
-
-    /*
-    function getVirtualPrice() external view returns (uint _virtualPrice) {
-        (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
-        uint _invariant = _computeInvariant(_reserve0, _reserve1);
-        _virtualPrice = (_invariant * 1e18) / totalSupply;
-    }
-    */
-
-
-
-    
-
-    /*
-    struct SwapCache {
-        uint reserve0;
-        uint reserve1;
-        uint amount0Out;
-        uint amount1Out;
-        address from;
-    }
-
-    function _swap(
-        SwapCache memory _cache
-    ) private returns (uint _amount0In, uint _amount1In) {
-        // Get latest balances after transfer.
-        (uint _balance0, uint _balance1) = _balances();
-        //console.log('balance0', _balance0);
-        //console.log('balance1', _balance1);
-
-        // Get input amounts.
-        _amount0In = _balance0 > _cache.reserve0 - _cache.amount0Out ? _balance0 - (_cache.reserve0 - _cache.amount0Out) : 0;
-        _amount1In = _balance1 > _cache.reserve1 - _cache.amount1Out ? _balance1 - (_cache.reserve1 - _cache.amount1Out) : 0;
-        require(_amount0In != 0 || _amount1In != 0, "I"); // INSUFFICIENT_INPUT_AMOUNT
-
-        // Subtract fees from balances and check invariant.
-        uint24 _swapFee = _notifySwapFee(_cache.from, _amount0In, _amount1In);
-        uint _fees0 = _amount0In == 0 ? 0 : (_amount0In * _swapFee / SWAP_FEE_PRECISION);
-        uint _fees1 = _amount1In == 0 ? 0 : (_amount1In * _swapFee / SWAP_FEE_PRECISION);
-
-        address _feeRecipient = ISyncSwapFactory(factory).feeRecipient();
-        if (_feeRecipient != address(0)) { // transfer protocol fees if enabled.
-            //console.log('feeRecipient', _feeRecipient);
-            uint8 _protocolFee = ISyncSwapFactory(factory).protocolFee();
-            if (_protocolFee != 0) {
-                //console.log('protocolFees0', _fees0 / _protocolFee);
-                if (_fees0 > MINIMUM_FEES) {
-                    TransferHelper.safeTransfer(token0, _feeRecipient, _fees0 / _protocolFee);
-                }
-
-                //console.log('protocolFees1', _fees1 / _protocolFee);
-                if (_fees1 > MINIMUM_FEES) {
-                    TransferHelper.safeTransfer(token1, _feeRecipient, _fees1 / _protocolFee);
-                }
-            }
-        }
-
-        uint _balance0Adjusted = _balance0 - _fees0;
-        uint _balance1Adjusted = _balance1 - _fees1;
-
-        
-        console.log('reserve0', _cache.reserve0);
-        console.log('reserve1', _cache.reserve1);
-        console.log('amount0Out', _cache.amount0Out);
-        console.log('amount1Out', _cache.amount1Out);
-        console.log('amount0In', _amount0In);
-        console.log('amount1In', _amount1In);
-        console.log('swapFee', _swapFee);
-        console.log('fees0', _fees0);
-        console.log('fees1', _fees1);
-        console.log('balance0Adjusted', _balance0Adjusted);
-        console.log('balance1Adjusted', _balance1Adjusted);
-        console.log('new K', _k(_balance0Adjusted, _balance1Adjusted));
-        console.log('old K', _k(_cache.reserve0, _cache.reserve1));
-        
-        require(_k(_balance0Adjusted, _balance1Adjusted) >= _k(_cache.reserve0, _cache.reserve1), "K");
-
-        _updateReserves(_balance0, _balance1);
-    }
-
-    function swap(
-        uint _amount0Out,
-        uint _amount1Out,
-        address _to,
-        address _from,
-        bytes calldata _data
-    ) external override lock {
-        require(_amount0Out != 0 || _amount1Out != 0, "O"); // INSUFFICIENT_OUTPUT_AMOUNT
-        (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
-        require(_amount0Out < _reserve0 && _amount1Out < _reserve1, "L"); // INSUFFICIENT_LIQUIDITY
-
-        // Transfer tokens optimistically.
-        if (_amount0Out != 0) {
-            TransferHelper.safeTransfer(token0, _to, _amount0Out);
-        }
-        if (_amount1Out != 0) {
-            TransferHelper.safeTransfer(token1, _to, _amount1Out);
-        }
-
-        // Call the callback if has data.
-        if (_data.length != 0) {
-            ISyncSwapCallback(_to).syncSwapCallback(msg.sender, _amount0Out, _amount1Out, _data);
-        }
-
-        (uint _amount0In, uint _amount1In) = _swap(
-            SwapCache(_reserve0, _reserve1, _amount0Out, _amount1Out, _from)
-        );
-
-        emit Swap(msg.sender, _amount0In, _amount1In, _amount0Out, _amount1Out, _to);
-    }
-    */
 }

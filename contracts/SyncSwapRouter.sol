@@ -4,441 +4,549 @@ pragma solidity ^0.8.0;
 
 import "./interfaces/IWETH.sol";
 import "./interfaces/IERC20Permit.sol";
+import "./interfaces/IPool.sol";
+import "./interfaces/IVault.sol";
+import "./interfaces/IBasePool.sol";
+import "./interfaces/ISyncSwapRouter.sol";
+import "./interfaces/ISyncSwapFactory.sol";
 import "./libraries/TransferHelper.sol";
-import "./SyncSwapLibrary.sol";
 
-contract SyncSwapRouter {
+error NotEnoughLiquidityMinted();
+error TooLittleReceived();
+error Expired();
 
+contract SyncSwapRouter is ISyncSwapRouter {
+
+    address public immutable vault;
     address public immutable factory;
-    // solhint-disable-next-line var-name-mixedcase
-    address public immutable WETH;
+    address public immutable wETH;
+    address private constant NATIVE_ETH = address(0);
 
     modifier ensure(uint deadline) {
         // solhint-disable-next-line not-rely-on-time
-        require(deadline >= block.timestamp, "X"); // EXPIRED
+        if (block.timestamp > deadline) revert Expired();
         _;
     }
 
-    // solhint-disable-next-line var-name-mixedcase
-    constructor(address _factory, address _WETH) {
+    constructor(address _vault, address _factory, address _wETH) {
+        vault = _vault;
         factory = _factory;
-        WETH = _WETH;
+        wETH = _wETH;
     }
 
     receive() external payable {
-        assert(msg.sender == WETH); // only accept ETH via fallback from the WETH contract
+        assert(msg.sender == wETH); // only accept ETH via fallback from the WETH contract
     }
 
-    // TODO rescue
-
-    function _getReserves(
-        address pair,
-        address tokenA,
-        address tokenB
-    ) private view returns (uint reserveA, uint reserveB) {
-        (uint reserve0, uint reserve1) = (ISyncSwapPool(pair).reserve0(), ISyncSwapPool(pair).reserve1());
-        (reserveA, reserveB) = tokenA < tokenB ? (reserve0, reserve1) : (reserve1, reserve0);
+    function _getPool(address tokenA, address tokenB, bool stable) private view returns (address pool) {
+        pool = ISyncSwapFactory(factory).getPool(tokenA, tokenB, stable);
     }
 
-    function _quote(uint amountA, uint reserveA, uint reserveB) private pure returns (uint amountB) {
-        amountB = amountA * reserveB / reserveA;
+    function _getOrCreatePool(address tokenA, address tokenB, bool stable) private returns (address pool) {
+        pool = ISyncSwapFactory(factory).getPool(tokenA, tokenB, stable);
+
+        // Creates the pool if not exists.
+        if (pool == address(0)) {
+            pool = ISyncSwapFactory(factory).createPool(tokenA, tokenB, stable);
+        }
     }
 
-    function _pairFor(address tokenA, address tokenB, bool stable) private view returns (address pair) {
-        pair = ISyncSwapFactory(factory).getPair(tokenA, tokenB, stable);
-    }
-
-    function _addLiquidity(
+    // Add Liquidity
+    /*
+    function _transferAndAddLiquidity(
+        address pool,
         address tokenA,
         address tokenB,
-        bool stable,
-        uint amountADesired,
-        uint amountBDesired,
-        uint amountAMin,
-        uint amountBMin
-    ) internal returns (address pair, uint amountA, uint amountB) {
-        pair = _pairFor(tokenA, tokenB, stable);
-        // create the pair if it doesn"t exist yet
-        if (pair == address(0)) {
-            pair = ISyncSwapFactory(factory).createPair(tokenA, tokenB, stable);
-            (amountA, amountB) = (amountADesired, amountBDesired);
+        uint amountA,
+        uint amountB,
+        uint minLiquidity,
+        address to,
+        bool ethIn
+    ) private returns (uint liquidity) {
+        if (ethIn) {
+            _transferTokensOrETHFromSender(tokenA, pool, amountA);
+            _transferTokensOrETHFromSender(tokenB, pool, amountB);
         } else {
-            (uint reserveA, uint reserveB) = _getReserves(pair, tokenA, tokenB);
-            if (reserveA == 0 && reserveB == 0) {
-                (amountA, amountB) = (amountADesired, amountBDesired);
-            } else {
-                uint amountBOptimal = _quote(amountADesired, reserveA, reserveB);
+            TransferHelper.safeTransferFrom(tokenA, msg.sender, pool, amountA);
+            TransferHelper.safeTransferFrom(tokenB, msg.sender, pool, amountB);
+        }
 
-                if (amountBOptimal <= amountBDesired) {
-                    require(amountBOptimal >= amountBMin, "B"); // INSUFFICIENT_B_AMOUNT
-                    (amountA, amountB) = (amountADesired, amountBOptimal);
-                } else {
-                    uint amountAOptimal = _quote(amountBDesired, reserveB, reserveA);
-                    //assert(amountAOptimal <= amountADesired);
-                    require(amountAOptimal >= amountAMin, "A"); // INSUFFICIENT_A_AMOUNT
-                    (amountA, amountB) = (amountAOptimal, amountBDesired);
-                }
+        liquidity = ISyncSwapPool(pool).mint(to);
+        if (liquidity < minLiquidity) {
+            revert NotEnoughLiquidityMinted();
+        }
+    }
+    */
+
+    struct TokenInput {
+        address token;
+        uint amount;
+    }
+
+    function _transferFromSender(address token, address to, uint amount) private {
+        if (token == NATIVE_ETH) {
+            // Wrap native ETH to wETH.
+            //IWETH(wETH).deposit{value: msg.value}();
+
+            // Send wETH to recipient.
+            //require(IWETH(wETH).transfer(to, amount));
+            IVault(vault).deposit{value: msg.value}(token, to);
+        } else {
+            // Transfer tokens to the vault.
+            TransferHelper.safeTransferFrom(token, msg.sender, vault, amount);
+
+            // Notify the vault to deposit.
+            IVault(vault).deposit(token, to);
+        }
+    }
+
+    function _transferAndAddLiquidity(
+        address pool,
+        TokenInput[] calldata inputs,
+        bytes calldata data,
+        uint minLiquidity
+    ) private returns (uint liquidity) {
+        // Send all input tokens to the pool.
+        uint n = inputs.length;
+
+        TokenInput memory input;
+
+        for (uint i; i < n; ) {
+            input = inputs[i];
+
+            _transferFromSender(input.token, pool, input.amount);
+
+            unchecked {
+                ++i;
             }
+        }
+
+        liquidity = IPool(pool).mint(data);
+
+        if (liquidity < minLiquidity) {
+            revert NotEnoughLiquidityMinted();
         }
     }
 
     function addLiquidity(
-        address tokenA,
-        address tokenB,
-        bool stable,
-        uint amountADesired,
-        uint amountBDesired,
-        uint amountAMin,
-        uint amountBMin,
-        address to,
-        uint deadline
-    ) external ensure(deadline) returns (uint amountA, uint amountB, uint liquidity) {
-        address pair;
-        (pair, amountA, amountB) = _addLiquidity(
-            tokenA, tokenB, stable, amountADesired, amountBDesired, amountAMin, amountBMin
+        address pool,
+        TokenInput[] calldata inputs,
+        bytes calldata data,
+        uint minLiquidity
+    ) external payable returns (uint liquidity) {
+        liquidity = _transferAndAddLiquidity(
+            pool,
+            inputs,
+            data,
+            minLiquidity
         );
-
-        TransferHelper.safeTransferFrom(tokenA, msg.sender, pair, amountA);
-        TransferHelper.safeTransferFrom(tokenB, msg.sender, pair, amountB);
-
-        liquidity = ISyncSwapPool(pair).mint(to);
     }
 
-    function addLiquidityETH(
-        address token,
-        bool stable,
-        uint amountTokenDesired,
-        uint amountTokenMin,
-        uint amountETHMin,
-        address to,
-        uint deadline
-    ) external payable ensure(deadline) returns (uint amountToken, uint amountETH, uint liquidity) {
-        address pair;
-        (pair, amountToken, amountETH) = _addLiquidity(
-            token,
-            WETH,
-            stable,
-            amountTokenDesired,
-            msg.value,
-            amountTokenMin,
-            amountETHMin
-        );
+    function addLiquidityWithPermit(
+        address pool,
+        TokenInput[] calldata inputs,
+        bytes calldata data,
+        uint minLiquidity,
+        SplitPermitParams[] memory permits
+    ) external payable returns (uint liquidity) {
+        // Approve all tokens via permit.
+        uint n = permits.length;
 
-        TransferHelper.safeTransferFrom(token, msg.sender, pair, amountToken);
+        SplitPermitParams memory params;
 
-        IWETH(WETH).deposit{value: amountETH}();
-        // solhint-disable-next-line reason-string
-        require(IWETH(WETH).transfer(pair, amountETH));
-        
-        liquidity = ISyncSwapPool(pair).mint(to);
+        for (uint i; i < n; ) {
+            params = permits[i];
 
-        // refund dust eth, if any
-        if (msg.value > amountETH) {
-            TransferHelper.safeTransferETH(msg.sender, msg.value - amountETH);
-        }
-    }
-
-    function _removeLiquidity(
-        address pair,
-        address tokenA,
-        address tokenB,
-        uint liquidity,
-        uint amountAMin,
-        uint amountBMin,
-        address to
-    ) internal returns (uint amountA, uint amountB) {
-        ISyncSwapPool(pair).transferFrom(msg.sender, pair, liquidity); // send liquidity to pair
-        (uint amount0, uint amount1) = ISyncSwapPool(pair).burn(to);
-
-        (amountA, amountB) = tokenA < tokenB ? (amount0, amount1) : (amount1, amount0);
-        require(amountA >= amountAMin, "A"); // INSUFFICIENT_A_AMOUNT
-        require(amountB >= amountBMin, "B"); // INSUFFICIENT_B_AMOUNT
-    }
-
-    function removeLiquidity(
-        address tokenA,
-        address tokenB,
-        bool stable,
-        uint liquidity,
-        uint amountAMin,
-        uint amountBMin,
-        address to,
-        uint deadline
-    ) external ensure(deadline) returns (uint amountA, uint amountB) {
-        address pair = _pairFor(tokenA, tokenB, stable);
-        (amountA, amountB) = _removeLiquidity(pair, tokenA, tokenB, liquidity, amountAMin, amountBMin, to);
-    }
-
-    function _removeLiquidityETH(
-        address pair,
-        address token,
-        uint liquidity,
-        uint amountTokenMin,
-        uint amountETHMin,
-        address to
-    ) internal returns (uint amountToken, uint amountETH) {
-        (amountToken, amountETH) = _removeLiquidity(
-            pair,
-            token,
-            WETH,
-            liquidity,
-            amountTokenMin,
-            amountETHMin,
-            address(this) // send tokens to router for unwrapping
-        );
-
-        TransferHelper.safeTransfer(token, to, amountToken);
-
-        IWETH(WETH).withdraw(amountETH);
-        TransferHelper.safeTransferETH(to, amountETH);
-    }
-
-    function removeLiquidityETH(
-        address token,
-        bool stable,
-        uint liquidity,
-        uint amountTokenMin,
-        uint amountETHMin,
-        address to,
-        uint deadline
-    ) external ensure(deadline) returns (uint amountToken, uint amountETH) {
-        address pair = _pairFor(token, WETH, stable);
-        (amountToken, amountETH) = _removeLiquidityETH(pair, token, liquidity, amountTokenMin, amountETHMin, to);
-    }
-
-    function removeLiquidityWithPermit(
-        address tokenA,
-        address tokenB,
-        bool stable,
-        uint liquidity,
-        uint amountAMin,
-        uint amountBMin,
-        address to,
-        uint deadline,
-        bool approveMax, bytes calldata signature
-    ) external returns (uint amountA, uint amountB) {
-        address pair = _pairFor(tokenA, tokenB, stable);
-
-        { // scope to avoid stack too deep errors
-        uint value = approveMax ? type(uint).max : liquidity;
-        ISyncSwapPool(pair).permit2(msg.sender, address(this), value, deadline, signature);
-        }
-
-        (amountA, amountB) = _removeLiquidity(pair, tokenA, tokenB, liquidity, amountAMin, amountBMin, to);
-    }
-
-    function removeLiquidityETHWithPermit(
-        address token,
-        bool stable,
-        uint liquidity,
-        uint amountTokenMin,
-        uint amountETHMin,
-        address to,
-        uint deadline,
-        bool approveMax, bytes calldata signature
-    ) external returns (uint amountToken, uint amountETH) {
-        address pair = _pairFor(token, WETH, stable);
-
-        { // scope to avoid stack too deep errors
-        uint value = approveMax ? type(uint).max : liquidity;
-        ISyncSwapPool(pair).permit2(msg.sender, address(this), value, deadline, signature);
-        }
-
-        (amountToken, amountETH) = _removeLiquidityETH(pair, token, liquidity, amountTokenMin, amountETHMin, to);
-    }
-
-    function _swap(
-        address pair,
-        uint[] memory amounts,
-        SyncSwapLibrary.Route[] memory routes,
-        address to
-    ) internal {
-        uint _routesLength = routes.length;
-
-        for (uint i; i < _routesLength;) {
-            SyncSwapLibrary.Route memory route = routes[i];
-            (uint amount0Out, uint amount1Out) = (
-                route.fromToken < route.toToken ? (uint(0), amounts[i + 1]) : (amounts[i + 1], uint(0))
+            IERC20Permit(params.token).permit(
+                msg.sender,
+                address(this),
+                params.approveAmount,
+                params.deadline,
+                params.v,
+                params.r,
+                params.s
             );
-
-            if (i < _routesLength - 1) {
-                address _currentPair = pair;
-                SyncSwapLibrary.Route memory nextRoute = routes[i + 1];
-                pair = _pairFor(nextRoute.fromToken, nextRoute.toToken, nextRoute.stable); // next pair
-                ISyncSwapPool(_currentPair).swap(amount0Out, amount1Out, pair, msg.sender, new bytes(0));
-            } else {
-                ISyncSwapPool(pair).swap(amount0Out, amount1Out, to, msg.sender, new bytes(0));
-            }
 
             unchecked {
                 ++i;
             }
         }
-    }
 
-    function _transferAndSwap(
-        uint amountIn,
-        uint[] memory amounts,
-        SyncSwapLibrary.Route[] calldata routes,
-        address to
-    ) internal {
-        SyncSwapLibrary.Route memory routeIn = routes[0];
-        address initialPair = _pairFor(routeIn.fromToken, routeIn.toToken, routeIn.stable);
-        TransferHelper.safeTransferFrom(
-            routeIn.fromToken, msg.sender, initialPair, amountIn
+        liquidity = _transferAndAddLiquidity(
+            pool,
+            inputs,
+            data,
+            minLiquidity
         );
-        _swap(initialPair, amounts, routes, to);
-    }
-
-    function _getAmountsOut(
-        uint amountIn,
-        uint amountOutMin,
-        SyncSwapLibrary.Route[] calldata routes
-    ) private view returns (uint[] memory amounts) {
-        amounts = SyncSwapLibrary.getAmountsOut(factory, address(this), msg.sender, amountIn, routes);
-        require(amounts[amounts.length - 1] >= amountOutMin, "O"); // INSUFFICIENT_OUTPUT_AMOUNT
-    }
-
-    function swapExactTokensForTokens(
-        uint amountIn,
-        uint amountOutMin,
-        SyncSwapLibrary.Route[] calldata routes,
-        address to,
-        uint deadline
-    ) external ensure(deadline) returns (uint[] memory amounts) {
-        amounts = _getAmountsOut(amountIn, amountOutMin, routes);
-        _transferAndSwap(amountIn, amounts, routes, to);
-    }
-
-    function _permit(
-        address token,
-        uint amountIn,
-        uint deadline,
-        bool approveMax,
-        uint8 v, bytes32 r, bytes32 s
-    ) private {
-        uint value = approveMax ? type(uint).max : amountIn;
-        IERC20Permit(token).permit(msg.sender, address(this), value, deadline, v, r, s);
-    }
-
-    function swapExactTokensForTokensWithPermit(
-        uint amountIn,
-        uint amountOutMin,
-        SyncSwapLibrary.Route[] calldata routes,
-        address to,
-        uint deadline,
-        bool approveMax, uint8 v, bytes32 r, bytes32 s
-    ) external ensure(deadline) returns (uint[] memory amounts) {
-        amounts = _getAmountsOut(amountIn, amountOutMin, routes);
-
-        // Approve tokens with permit.
-        _permit(routes[0].fromToken, amountIn, deadline, approveMax, v, r, s);
-
-        _transferAndSwap(amountIn, amounts, routes, to);
-    }
-
-    function swapExactETHForTokens(
-        uint amountOutMin,
-        SyncSwapLibrary.Route[] calldata routes,
-        address to,
-        uint deadline
-    ) external payable ensure(deadline) returns (uint[] memory amounts) {
-        amounts = _getAmountsOut(msg.value, amountOutMin, routes);
-
-        uint amountIn = amounts[0];
-        IWETH(WETH).deposit{value: amountIn}();
-
-        SyncSwapLibrary.Route memory routeIn = routes[0];
-        address initialPair = _pairFor(routeIn.fromToken, routeIn.toToken, routeIn.stable);
-        // solhint-disable-next-line reason-string
-        require(IWETH(WETH).transfer(initialPair, amountIn));
-
-        _swap(initialPair, amounts, routes, to);
-    }
-
-    function _transferAndSwapETH(
-        uint amountIn,
-        uint amountOut,
-        uint[] memory amounts,
-        SyncSwapLibrary.Route[] calldata routes,
-        address to
-    ) internal {
-        _transferAndSwap(amountIn, amounts, routes, address(this)); // send tokens to router for unwrapping
-
-        IWETH(WETH).withdraw(amountOut);
-        TransferHelper.safeTransferETH(to, amountOut);
-    }
-
-    function swapExactTokensForETH(
-        uint amountIn,
-        uint amountOutMin,
-        SyncSwapLibrary.Route[] calldata routes,
-        address to,
-        uint deadline
-    ) external ensure(deadline) returns (uint[] memory amounts) {
-        amounts = _getAmountsOut(amountIn, amountOutMin, routes);
-
-        _transferAndSwapETH(amountIn, amounts[amounts.length - 1], amounts, routes, to);
-    }
-
-    function swapExactTokensForETHWithPermit(
-        uint amountIn,
-        uint amountOutMin,
-        SyncSwapLibrary.Route[] calldata routes,
-        address to,
-        uint deadline,
-        bool approveMax, uint8 v, bytes32 r, bytes32 s
-    ) external ensure(deadline) returns (uint[] memory amounts) {
-        amounts = _getAmountsOut(amountIn, amountOutMin, routes);
-
-        // Approve tokens with permit.
-        _permit(routes[0].fromToken, amountIn, deadline, approveMax, v, r, s);
-
-        _transferAndSwapETH(amountIn, amounts[amounts.length - 1], amounts, routes, to);
     }
 
     /*
-    function _swapSupportingFeeOnTransferTokens(
-        address pair,
-        SyncSwapLibrary.Route[] memory routes,
-        address to
-    ) internal {
-        uint _routesLength = routes.length;
+    function addLiquidityWithPermit(
+        address tokenA,
+        address tokenB,
+        bool stable,
+        uint amountA,
+        uint amountB,
+        uint minLiquidity,
+        address to,
+        bool ethIn,
+        SplitPermitParams[] memory permitParams
+    ) external payable returns (uint liquidity, address pool) {
+        pool = _getOrCreatePool(tokenA, tokenB, stable);
 
-        for (uint i; i < _routesLength;) {
-            SyncSwapLibrary.Route memory route = routes[i];
-
-            uint amountOut;
-            {
-            (uint reserve0, uint reserve1) = (ISyncSwapPool(pair).reserve0(), ISyncSwapPool(pair).reserve1());
-            (uint reserveIn, uint reserveOut) = (
-                route.fromToken < route.toToken ? (reserve0, reserve1) : (reserve1, reserve0)
+        if (permitParams.length != 0) {
+            // Approve `tokenA` via permit.
+            SplitPermitParams memory data = permitParams[0];
+            IERC20Permit(tokenA).permit(
+                msg.sender,
+                address(this),
+                data.approveAmount,
+                data.deadline,
+                data.v,
+                data.r,
+                data.s
             );
-            uint amountIn = IERC20(route.fromToken).balanceOf(pair) - reserveIn;
-            amountOut = getAmountOut(
-                amountIn,
-                reserveIn,
-                reserveOut,
-                ISyncSwapFactory(factory).swapFee(pair)
-            ); // TODO
+
+            if (permitParams.length == 2) {
+                // Approve `tokenB` via permit.
+                data = permitParams[1];
+                IERC20Permit(tokenB).permit(
+                    msg.sender,
+                    address(this),
+                    data.approveAmount,
+                    data.deadline,
+                    data.v,
+                    data.r,
+                    data.s
+                );
             }
-            (uint amount0Out, uint amount1Out) = (
-                route.fromToken < route.toToken ? (0, amounts[i + 1]) : (amounts[i + 1], 0)
-            );
+        }
 
-            if (i < _routesLength - 1) {
-                address _currentPair = pair;
-                SyncSwapLibrary.Route memory nextRoute = routes[i + 1];
-                pair = _pairFor(nextRoute.fromToken, nextRoute.toToken, nextRoute.stable); // next pair
-                ISyncSwapPool(_currentPair).swap(amount0Out, amount1Out, pair, msg.sender, new bytes(0));
-            } else {
-                ISyncSwapPool(pair).swap(amount0Out, amount1Out, to, msg.sender, new bytes(0));
+        liquidity = _transferAndAddLiquidity(
+            pool,
+            tokenA,
+            tokenB,
+            amountA,
+            amountB,
+            minLiquidity,
+            to,
+            ethIn
+        );
+    }
+    */
+
+    // Remove Liquidity
+    function _transferAndBurnLiquidity(
+        address pool,
+        uint liquidity,
+        bytes memory data,
+        uint[] memory minAmounts
+        /*
+        address tokenA,
+        address tokenB,
+        uint liquidity,
+        uint minAmountA,
+        uint minAmountB,
+        address to,
+        bool ethOut
+        */
+    ) private returns (IPool.TokenAmount[] memory amounts) {
+        IBasePool(pool).transferFrom(msg.sender, pool, liquidity);
+
+        amounts = IPool(pool).burn(data);
+
+        uint n = amounts.length;
+
+        for (uint i; i < n; ) {
+            if (amounts[i].amount < minAmounts[i]) {
+                revert TooLittleReceived();
             }
 
             unchecked {
                 ++i;
             }
         }
+    }
+
+    function burnLiquidity(
+        address pool,
+        uint liquidity,
+        bytes calldata data,
+        uint[] calldata minAmounts
+    ) external returns (IPool.TokenAmount[] memory amounts) {
+        amounts = _transferAndBurnLiquidity(
+            pool,
+            liquidity,
+            data,
+            minAmounts
+        );
+    }
+
+    function burnLiquidityWithPermit(
+        address pool,
+        uint liquidity,
+        bytes calldata data,
+        uint[] calldata minAmounts,
+        ArrayPermitParams memory permit
+    ) external returns (IPool.TokenAmount[] memory amounts) {
+        // Approve liquidity via permit.
+        IBasePool(pool).permit2(
+            msg.sender,
+            address(this),
+            permit.approveAmount,
+            permit.deadline,
+            permit.signature
+        );
+
+        amounts = _transferAndBurnLiquidity(
+            pool,
+            liquidity,
+            data,
+            minAmounts
+        );
+    }
+
+    // Remove Liquidity Single
+    function _transferAndBurnLiquiditySingle(
+        address pool,
+        uint liquidity,
+        bytes memory data,
+        uint minAmount
+    ) private returns (uint amountOut) {
+        IBasePool(pool).transferFrom(msg.sender, pool, liquidity);
+
+        amountOut = IPool(pool).burnSingle(data);
+
+        if (amountOut < minAmount) {
+            revert TooLittleReceived();
+        }
+    }
+
+    function burnLiquiditySingle(
+        address pool,
+        uint liquidity,
+        bytes memory data,
+        uint minAmount
+    ) external returns (uint amountOut) {
+        amountOut = _transferAndBurnLiquiditySingle(
+            pool,
+            liquidity,
+            data,
+            minAmount
+        );
+    }
+
+    function removeLiquiditySingleWithPermit(
+        address pool,
+        uint liquidity,
+        bytes memory data,
+        uint minAmount,
+        ArrayPermitParams calldata permit
+    ) external returns (uint amountOut) {
+        // Approve liquidity via permit.
+        IBasePool(pool).permit2(
+            msg.sender,
+            address(this),
+            permit.approveAmount,
+            permit.deadline,
+            permit.signature
+        );
+
+        amountOut = _transferAndBurnLiquiditySingle(
+            pool,
+            liquidity,
+            data,
+            minAmount
+        );
+    }
+
+    /*
+    function swapExactInputSingle(
+        address fromToken,
+        address toToken,
+        bool stable,
+        uint amountIn,
+        uint amountOutMin,
+        address to,
+        bool ethIn,
+        bool ethOut
+    ) external returns (uint amountOut) {
+        // Prefund the pool.
+        address pool = _getPool(fromToken, toToken, stable);
+        if (ethIn) {
+            _transferETHFromSender(pool, amountIn);
+        } else {
+            TransferHelper.safeTransferFrom(fromToken, msg.sender, pool, amountIn);
+        }
+
+        // Perform the swap.
+        amountOut = ISyncSwapPool(pool).swap(
+            toToken,
+            ethOut ? address(this) : to
+        );
+
+        // Ensure the slippage.
+        if (amountOut < amountOutMin) {
+            revert TooLittleReceived();
+        }
+
+        // Unwrap and send native ETH if required.
+        if (ethOut) {
+            _sendEtherTo(to, amountOut);
+        }
+    }
+    */
+
+    function _swapExactInput(
+        SwapPath[] memory paths,
+        uint amountOutMin
+    ) private returns (uint amountOut) {
+        uint pathsLength = paths.length;
+
+        SwapPath memory path;
+        SwapStep memory step;
+        uint stepsLength;
+        uint j;
+
+        for (uint i; i < pathsLength; ) {
+            path = paths[i];
+
+            // Prefund the first step.
+            step = path.steps[0];
+            _transferFromSender(path.tokenIn, step.pool, path.amountIn);
+
+            // Cache steps length.
+            stepsLength = path.steps.length;
+
+            for (j; j < stepsLength; ) {
+                if (j < stepsLength - 1) {
+                    // Swap and send tokens to the next step.
+                    IBasePool(step.pool).swap(step.data);
+
+                    // Cache the next step.
+                    step = path.steps[j + 1];
+                } else {
+                    // Accumulate output amount at the last step.
+                    amountOut += IBasePool(step.pool).swap(step.data);
+                }
+
+                unchecked {
+                    ++j;
+                }
+            }
+
+            unchecked {
+                ++i;
+            }
+        }
+
+        if (amountOut < amountOutMin) {
+            revert TooLittleReceived();
+        }
+    }
+
+    /*
+    function _swapExactInput(
+        address pool,
+        uint amountIn,
+        uint amountOutMin,
+        SwapPath[] memory path,
+        address to,
+        bool ethIn,
+        bool ethOut
+    ) private returns (uint amountOut) {
+        // Cache and prefund the first pool.
+        //SwapPath memory pathIn = path[0];
+        //address pool = _getPool(pathIn.fromToken, pathIn.toToken, pathIn.stable);
+        if (ethIn) {
+            _transferETHFromSender(pool, amountIn);
+        } else {
+            TransferHelper.safeTransferFrom(path[0].fromToken, msg.sender, pool, amountIn);
+        }
+
+        uint pathLength = path.length;
+        for (uint i; i < pathLength; ) {
+            SwapPath memory currentPath = path[i];
+
+            if (i < pathLength - 1) {
+                // Cache the next pool.
+                address currentPool = pool;
+                SwapPath memory nextPath = path[i + 1];
+                pool = _getPool(nextPath.fromToken, nextPath.toToken, nextPath.stable); // next pool
+
+                // Perform the swap, and send output tokens to the next pool.
+                ISyncSwapPool(currentPool).swap(currentPath.fromToken, pool);
+
+                unchecked {
+                    ++i;
+                }
+            } else {
+                // Perform the swap.
+                amountOut = ISyncSwapPool(pool).swap(
+                    currentPath.toToken,
+                    ethOut ? address(this) : to
+                );
+
+                // Ensure the slippage.
+                if (amountOut < amountOutMin) {
+                    revert TooLittleReceived();
+                }
+
+                // Unwrap and send native ETH if required.
+                if (ethOut) {
+                    _sendEtherTo(to, amountOut);
+                }
+            }
+        }
+    }
+    */
+
+    function swapExactInput(
+        SwapPath[] memory paths,
+        uint amountOutMin,
+        uint deadline
+    ) external payable ensure(deadline) returns (uint amountOut) {
+        amountOut = _swapExactInput(
+            paths,
+            amountOutMin
+        );
+    }
+
+    function swapExactInputWithPermit(
+        SwapPath[] memory paths,
+        uint amountOutMin,
+        uint deadline,
+        SplitPermitParams calldata permit
+    ) external payable ensure(deadline) returns (uint amountOut) {
+        // Approve input tokens via permit.
+        IERC20Permit(permit.token).permit(
+            msg.sender,
+            address(this),
+            permit.approveAmount,
+            permit.deadline,
+            permit.v,
+            permit.r,
+            permit.s
+        );
+
+        amountOut = _swapExactInput(
+            paths,
+            amountOutMin
+        );
+    }
+
+    /*
+    function _transferTokensOrETHFromSender(address token, address to, uint amount) private {
+        if (token == wETH) {
+            _transferETHFromSender(to, amount);
+        } else {
+            TransferHelper.safeTransferFrom(token, msg.sender, to, amount);
+        }
+    }
+
+    function _transferETHFromSender(address to, uint amount) private {
+        IWETH(wETH).deposit{value: msg.value}();
+        require(IWETH(wETH).transfer(to, amount));
     }
     */
 }

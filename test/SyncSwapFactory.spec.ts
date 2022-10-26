@@ -2,7 +2,7 @@ import chai, { expect } from 'chai';
 import { BigNumber, Contract } from 'ethers';
 import { solidity } from 'ethereum-waffle';
 import { expandTo18Decimals } from './shared/utilities';
-import { deployTestERC20, factoryFixture } from './shared/fixtures';
+import { deployFactory, deployTestERC20 } from './shared/fixtures';
 import { Artifact, HardhatRuntimeEnvironment } from 'hardhat/types';
 import { SignerWithAddress } from '@nomiclabs/hardhat-ethers/signers';
 import { ZERO_ADDRESS } from './shared/utilities';
@@ -27,12 +27,9 @@ describe('SyncSwapFactory', () => {
   });
 
   let factory: Contract;
-  let swapFeeProvider: Contract;
 
   beforeEach(async () => {
-    const fixture = await factoryFixture(other.address);
-    factory = fixture.factory;
-    swapFeeProvider = fixture.swapFeeProvider;
+    factory = await deployFactory(other.address);
   });
 
   /*
@@ -41,84 +38,85 @@ describe('SyncSwapFactory', () => {
   })
   */
 
-  it('Should returns default fee recipient', async () => {
+  it('Should return default values', async () => {
     expect(await factory.feeRecipient()).to.eq(other.address);
-  });
-
-  it('Should returns default owner', async () => {
     expect(await factory.owner()).to.eq(wallet.address);
+    expect(await factory.allPoolsLength()).to.eq(0);
+    expect(await factory.protocolFee()).to.eq(30000);
+    expect(await factory.defaultSwapFeeVolatile()).to.eq(300);
+    expect(await factory.defaultSwapFeeStable()).to.eq(100);
   });
 
-  it('Should returns default pool count', async () => {
-    expect(await factory.allPairsLength()).to.eq(0);
-  });
-
-  it('Should returns default protocol fee', async () => {
-    expect(await factory.protocolFee()).to.eq(5);
-  });
-
-  it('Should returns default swap fee provider', async () => {
-    expect(await factory.swapFeeProvider()).to.eq(swapFeeProvider.address);
-  });
-
-  async function createPair(tokenA: string, tokenB: string, stable: boolean) {    
+  async function createPool(tokenA: string, tokenB: string, stable: boolean) {
     const [token0, token1]: [string, string] = (
       Number(tokenA) < Number(tokenB) ? [tokenA, tokenB] : [tokenB, tokenA]
     );
 
-    await expect(factory.createPair(tokenA, tokenB, stable))
-      .to.emit(factory, 'PairCreated');
+    await expect(factory.createPool(tokenA, tokenB, stable))
+      .to.emit(factory, 'PoolCreated');
 
-    await expect(factory.createPair(tokenA, tokenB, stable)).to.be.reverted; // PAIR_EXISTS
-    await expect(factory.createPair(tokenB, tokenA, stable)).to.be.reverted; // PAIR_EXISTS
+    await expect(factory.createPool(tokenA, tokenB, stable)).to.be.reverted; // PAIR_EXISTS
+    await expect(factory.createPool(tokenB, tokenA, stable)).to.be.reverted; // PAIR_EXISTS
 
-    const pairAddress = await factory.getPair(tokenA, tokenB, stable);
-    expect(await factory.getPair(tokenB, tokenA, stable)).to.eq(pairAddress);
-    expect(await factory.getPair(tokenB, tokenA, !stable)).to.eq(ZERO_ADDRESS);
-    expect(await factory.isPair(pairAddress)).to.eq(true);
-    expect(await factory.allPairs(0)).to.eq(pairAddress);
-    expect(await factory.allPairsLength()).to.eq(1);
+    const pairAddress = await factory.getPool(tokenA, tokenB, stable);
+    expect(await factory.getPool(tokenB, tokenA, stable)).to.eq(pairAddress);
+    expect(await factory.getPool(tokenB, tokenA, !stable)).to.eq(ZERO_ADDRESS);
+    expect(await factory.isPool(pairAddress)).to.eq(true);
+    expect(await factory.allPools(0)).to.eq(pairAddress);
+    expect(await factory.allPoolsLength()).to.eq(1);
 
     const pairArtifact: Artifact = await hre.artifacts.readArtifact('SyncSwapPool');
     const pair = new Contract(pairAddress, pairArtifact.abi, ethers.provider);
     expect(await pair.factory()).to.eq(factory.address);
     expect(await pair.token0()).to.eq(token0);
     expect(await pair.token1()).to.eq(token1);
-    expect(await pair.stable()).to.eq(stable);
+    expect(await pair.A()).to.eq(stable ? '400000' : 0);
   };
 
   it('Should create a volatile pool', async () => {
-    await createPair(testTokens[0], testTokens[1], false);
+    await createPool(testTokens[0], testTokens[1], false);
   });
 
   it('Should create a stable pool', async () => {
-    await createPair(testTokens[0], testTokens[1], true);
+    await createPool(testTokens[0], testTokens[1], true);
   });
 
   it('Should create a volatile pool in reverse tokens', async () => {
-    await createPair(testTokens[1], testTokens[0], false);
+    await createPool(testTokens[1], testTokens[0], false);
   });
 
   it('Should create a stable pool in reverse tokens', async () => {
-    await createPair(testTokens[1], testTokens[0], true);
+    await createPool(testTokens[1], testTokens[0], true);
   });
 
   it('Should use expected gas on creating pair', async () => {
-    const tx = await factory.createPair(testTokens[0], testTokens[1], false);
+    const tx = await factory.createPool(testTokens[0], testTokens[1], false);
     const receipt = await tx.wait();
-    expect(receipt.gasUsed).to.eq(2232828); // 2512920 for Uniswap V2
+    expect(receipt.gasUsed).to.eq(2767452); // 2512920 for Uniswap V2
   });
 
   it('Should set a new fee recipient', async () => {
+    // Set fee recipient using a wrong account.
     await expect(factory.connect(other).setFeeRecipient(other.address)).to.be.reverted;
+
+    // Set a new fee recipient.
     await factory.setFeeRecipient(wallet.address);
+
+    // Expect new fee recipient.
     expect(await factory.feeRecipient()).to.eq(wallet.address);
   });
 
   it('Should set a new protocol fee', async () => {
-    expect(await factory.protocolFee()).to.eq(5);
-    await expect(factory.connect(other).setProtocolFee(6)).to.be.reverted;
-    await factory.setProtocolFee(6);
-    expect(await factory.protocolFee()).to.eq(6);
+    // Expect current protocol fee.
+    expect(await factory.protocolFee()).to.eq(30000);
+
+    // Set protocol fee using wrong account.
+    await expect(factory.connect(other).setProtocolFee(50000)).to.be.reverted;
+
+    // Set a new protocol fee.
+    await factory.setProtocolFee(50000);
+
+    // Expect new protocol fee.
+    expect(await factory.protocolFee()).to.eq(50000);
   });
 });

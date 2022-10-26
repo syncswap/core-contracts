@@ -17,6 +17,8 @@ const overrides = {
   gasLimit: 9999999
 }
 
+
+/*
 describe('SyncSwapRouter', () => {
 
   const provider = ethers.provider
@@ -650,8 +652,8 @@ describe('fee-on-transfer tokens', () => {
     DTT = await deployDeflatingERC20(expandTo18Decimals(10000))
 
     // make a DTT<>WETH pair
-    await fixture.factory.createPair(DTT.address, WETH.address)
-    const pairAddress = await fixture.factory.getPair(DTT.address, WETH.address)
+    await fixture.factory.createPool(DTT.address, WETH.address)
+    const pairAddress = await fixture.factory.getPool(DTT.address, WETH.address)
     const pairArtifact = await hre.artifacts.readArtifact('Pool');
     pair = new Contract(pairAddress, pairArtifact.abi, ethers.provider).connect(wallet)
   })
@@ -872,8 +874,8 @@ describe('fee-on-transfer tokens: reloaded', () => {
     DTT2 = await deployDeflatingERC20(expandTo18Decimals(10000))
 
     // make a DTT<>WETH pair
-    await fixture.factory.createPair(DTT.address, DTT2.address)
-    const pairAddress = await fixture.factory.getPair(DTT.address, DTT2.address)
+    await fixture.factory.createPool(DTT.address, DTT2.address)
+    const pairAddress = await fixture.factory.getPool(DTT.address, DTT2.address)
   })
 
   afterEach(async function () {

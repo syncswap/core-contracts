@@ -5,49 +5,34 @@ import "@nomiclabs/hardhat-solhint";
 
 module.exports = {
   // hardhat-zksync-solc
-  // The compiler configuration for 'zk' artifacts.
-  /*
+  // The compiler configuration for zkSync artifacts.
   zksolc: {
-    version: "0.1.0",
-    compilerSource: "docker",
+    version: "latest",
+    compilerSource: "binary",
     settings: {
-      optimizer: {
-        enabled: true,
-        runs: 1000000
-      },
-      experimental: {
-        dockerImage: "matterlabs/zksolc",
-      },
-    },
-  },
-  */
-  zksolc: {
-    version: "1.1.6",
-    compilerSource: "docker",
-    settings: {
-      experimental: {
-        dockerImage: "matterlabs/zksolc",
-        tag: "v1.1.6"
-      }
+      compilerPath: "./zksolc-linux-amd64-musl-v1.2.0",
     },
   },
 
   // hardhat-zksync-deploy
-  // Run `deploy-zksync` task to deploy 'zk' artifacts into following network.
-  // Note that it will use `artifacts` and `cache` instead of the one with -zk suffix!
+  // Run `deploy-zksync` task to deploy zkSync artifacts into following network.
+  // Note that it will use `artifacts` instead of `artifacts-zk`.
   zkSyncDeploy: {
     zkSyncNetwork: "https://zksync2-testnet.zksync.dev",
     ethNetwork: "goerli",
   },
 
-  // The compiler configuration for 'normal' artifacts.
+  // The compiler configuration for normal artifacts.
   solidity: {
     version: "0.8.15",
     settings: {
       optimizer: {
         enabled: true,
-        runs: 999999
-      }
+        runs: 200,
+        details: {
+          yul: false
+        }
+      },
     }
   },
 
@@ -61,15 +46,15 @@ module.exports = {
   // tests
   defaultNetwork: 'hardhat',
   networks: {
-    // Run compile task with this network to generate 'normal' artifacts/cache.
-    // For example `yarn hardhat compile --network hardhat`
+    // Run compile task with this network to generate normal artifacts.
+    // Example: `yarn hardhat compile --network hardhat`
     hardhat: {
       chainId: 280
     },
 
-    // Run compile task with this network to generate 'zk' artifacts/cache (with -zk suffix).
-    // For example `yarn hardhat compile --network zksync`
-    zksync: {
+    // Run compile task with this network to generate `artifacts-zk` and `cache-zk`.
+    // Example: `yarn hardhat compile --network zksync`
+    zksyncTestnet: {
       zksync: true,
       url: 'https://zksync2-testnet.zksync.dev',
       chainId: 280

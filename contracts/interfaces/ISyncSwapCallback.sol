@@ -3,5 +3,5 @@
 pragma solidity >=0.5.0;
 
 interface ISyncSwapCallback {
-    function syncSwapCallback(address sender, uint amount0Out, uint amount1Out, bytes calldata data) external;
+    function syncSwapCallback(uint amount0In, uint amount1In, uint amount0Out, uint amount1Out, address to, bytes calldata data) external;
 }
