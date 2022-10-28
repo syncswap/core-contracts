@@ -3,12 +3,12 @@
 pragma solidity ^0.8.0;
 
 import "./interfaces/IWETH.sol";
-import "./interfaces/IPool.sol";
 import "./interfaces/IVault.sol";
-import "./interfaces/IBasePool.sol";
-import "./interfaces/IPoolFactory.sol";
-import "./interfaces/IERC20Permit.sol";
-import "./interfaces/ISyncSwapRouter.sol";
+import "./interfaces/IRouter.sol";
+import "./interfaces/pool/IPool.sol";
+import "./interfaces/pool/IBasePool.sol";
+import "./interfaces/token/IERC20Permit.sol";
+import "./interfaces/factory/IPoolFactory.sol";
 
 import "./libraries/TransferHelper.sol";
 
@@ -19,7 +19,7 @@ error NotEnoughLiquidityMinted();
 error TooLittleReceived();
 error Expired();
 
-contract SyncSwapRouter is ISyncSwapRouter, SelfPermit, Multicall {
+contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
 
     struct TokenInput {
         address token;

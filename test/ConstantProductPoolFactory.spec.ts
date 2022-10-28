@@ -2,16 +2,17 @@ import chai, { expect } from 'chai';
 import { Contract } from 'ethers';
 import { solidity } from 'ethereum-waffle';
 import { expandTo18Decimals } from './shared/utilities';
-import { deployConstantProductPoolFactory, deployTestERC20, deployVault, deployWETH9 } from './shared/fixtures';
+import { deployClassicPoolFactory, deployPoolMaster, deployTestERC20, deployVault, deployWETH9 } from './shared/fixtures';
 import { Artifact, HardhatRuntimeEnvironment } from 'hardhat/types';
 import { SignerWithAddress } from '@nomiclabs/hardhat-ethers/signers';
 import { ZERO_ADDRESS } from './shared/utilities';
+import { defaultAbiCoder } from 'ethers/lib/utils';
 
 const hre: HardhatRuntimeEnvironment = require('hardhat');
 const ethers = require("hardhat").ethers;
 chai.use(solidity);
 
-describe('ConstantProductPoolFactory', () => {
+describe('SyncSwapClassicPoolFactory', () => {
   let wallets: SignerWithAddress[];
   let testTokens: [string, string];
 
@@ -25,12 +26,14 @@ describe('ConstantProductPoolFactory', () => {
 
   let weth: Contract;
   let vault: Contract;
+  let master: Contract;
   let factory: Contract;
 
   beforeEach(async () => {
     weth = await deployWETH9();
     vault = await deployVault(weth.address);
-    factory = await deployConstantProductPoolFactory(vault.address, wallets[1].address);
+    master = await deployPoolMaster(vault.address, wallets[1].address);
+    factory = await deployClassicPoolFactory(master);
   });
 
   /*
@@ -39,53 +42,53 @@ describe('ConstantProductPoolFactory', () => {
   })
   */
 
-  it('Should return default values', async () => {
-    expect(await factory.feeRecipient()).to.eq(wallets[1].address);
-    expect(await factory.owner()).to.eq(wallets[0].address);
-    expect(await factory.poolsLength()).to.eq(0);
-    expect(await factory.protocolFee()).to.eq(30000);
-    expect(await factory.defaultSwapFee()).to.eq(300);
-  });
-
-  async function createConstantProductPool(tokenA: string, tokenB: string) {
+  async function createClassicPool(tokenA: string, tokenB: string) {
     const [token0, token1]: [string, string] = (
       Number(tokenA) < Number(tokenB) ? [tokenA, tokenB] : [tokenB, tokenA]
     );
 
-    await expect(factory.createPool(tokenA, tokenB))
+    const data: string = defaultAbiCoder.encode(
+      ["address", "address"], [tokenA, tokenB]
+    );
+    await expect(master.createPool(factory.address, data))
       .to.emit(factory, 'PoolCreated');
 
-    await expect(factory.createPool(tokenA, tokenB)).to.be.revertedWith('PoolExists()');
-    await expect(factory.createPool(tokenB, tokenA)).to.be.revertedWith('PoolExists()');
+    await expect(master.createPool(factory.address, data)).to.be.revertedWith('PoolExists()');
+    await expect(master.createPool(factory.address, data)).to.be.revertedWith('PoolExists()');
 
-    const poolAddress = await factory.getPool(tokenA, tokenB);
+    const poolAddress: string = await factory.getPool(tokenA, tokenB);
     expect(await factory.getPool(tokenB, tokenA)).to.eq(poolAddress);
-    expect(await factory.isPool(poolAddress)).to.eq(true);
-    expect(await factory.pools(0)).to.eq(poolAddress);
-    expect(await factory.poolsLength()).to.eq(1);
+    expect(await master.isPool(poolAddress)).to.eq(true);
+    //expect(await factory.pools(0)).to.eq(poolAddress);
+    //expect(await factory.poolsLength()).to.eq(1);
 
-    const poolArtifact: Artifact = await hre.artifacts.readArtifact('ConstantProductPool');
+    const poolArtifact: Artifact = await hre.artifacts.readArtifact('SyncSwapClassicPool');
     const pool = new Contract(poolAddress, poolArtifact.abi, ethers.provider);
     expect(await pool.poolType()).to.eq(1);
-    expect(await pool.factory()).to.eq(factory.address);
+    expect(await pool.master()).to.eq(master.address);
+    expect(await pool.vault()).to.eq(vault.address);
     expect(await pool.token0()).to.eq(token0);
     expect(await pool.token1()).to.eq(token1);
   };
 
-  it('Should create a constant product pool', async () => {
-    await createConstantProductPool(testTokens[0], testTokens[1]);
+  it('Should create a classic pool', async () => {
+    await createClassicPool(testTokens[0], testTokens[1]);
   });
 
-  it('Should create a constant product pool in reverse tokens', async () => {
-    await createConstantProductPool(testTokens[1], testTokens[0]);
+  it('Should create a classic pool in reverse tokens', async () => {
+    await createClassicPool(testTokens[1], testTokens[0]);
   });
 
-  it('Should use expected gas on creating constant product pool', async () => {
-    const tx = await factory.createPool(testTokens[0], testTokens[1]);
+  it('Should use expected gas on creating classic pool', async () => {
+    const data = defaultAbiCoder.encode(
+      ["address", "address"], [testTokens[0], testTokens[1]]
+    );
+    const tx = await master.createPool(factory.address, data);
     const receipt = await tx.wait();
-    expect(receipt.gasUsed).to.eq(2302897); // 2512920 for Uniswap V2
+    expect(receipt.gasUsed).to.eq(2293578); // 2512920 for Uniswap V2
   });
 
+  /*
   it('Should set a new fee recipient', async () => {
     // Set fee recipient using a wrong account.
     await expect(factory.connect(wallets[1]).setFeeRecipient(wallets[1].address)).to.be.reverted;
@@ -110,4 +113,5 @@ describe('ConstantProductPoolFactory', () => {
     // Expect new protocol fee.
     expect(await factory.protocolFee()).to.eq(50000);
   });
+  */
 });

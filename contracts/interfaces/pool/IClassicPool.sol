@@ -4,5 +4,5 @@ pragma solidity >=0.5.0;
 
 import "./IBasePool.sol";
 
-interface IConstantProductPool is IBasePool {
+interface IClassicPool is IBasePool {
 }

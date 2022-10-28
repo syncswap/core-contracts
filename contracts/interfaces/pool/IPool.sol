@@ -9,8 +9,7 @@ interface IPool {
     }
 
     function poolType() external view returns (uint16);
-
-    function factory() external view returns (address);
+    function master() external view returns (address);
     function vault() external view returns (address);
 
     function getAssets() external view returns (address[] memory assets);

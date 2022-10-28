@@ -18,6 +18,7 @@ let other: SignerWithAddress;
 
 let weth: Contract;
 let vault: Contract;
+let master: Contract;
 let factory: Contract;
 
 let pool: Contract;
@@ -319,6 +320,7 @@ describe('Stable Pool', () => {
     const fixture = await stablePoolFixture(wallet, other.address);
     weth = fixture.weth;
     vault = fixture.vault;
+    master = fixture.master;
     factory = fixture.factory;
     token0 = fixture.token0;
     token1 = fixture.token1;
@@ -326,7 +328,8 @@ describe('Stable Pool', () => {
   });
 
   it("Should returns expected pool metadata", async () => {
-    expect(await pool.factory()).to.eq(factory.address);
+    expect(await pool.master()).to.eq(master.address);
+    expect(await pool.vault()).to.eq(vault.address);
     expect(await pool.token0()).to.eq(token0.address);
     expect(await pool.token1()).to.eq(token1.address);
     expect(await pool.poolType()).to.eq(2);

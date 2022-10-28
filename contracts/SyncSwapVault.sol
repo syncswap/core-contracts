@@ -4,7 +4,8 @@ pragma solidity ^0.8.0;
 
 import "./interfaces/IVault.sol";
 import "./interfaces/IWETH.sol";
-import "./interfaces/IERC20.sol";
+import "./interfaces/token/IERC20.sol";
+
 import "./libraries/Lock.sol";
 import "./libraries/TransferHelper.sol";
 

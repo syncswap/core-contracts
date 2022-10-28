@@ -4,7 +4,7 @@ pragma solidity ^0.8.0;
 
 import "../libraries/SignatureChecker.sol";
 
-import "../interfaces/IERC20Permit2.sol";
+import "../interfaces/token/IERC20Permit2.sol";
 
 error Expired();
 error InvalidSignature();

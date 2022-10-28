@@ -110,8 +110,8 @@ async function calculateMintProtocolFee(
   const totalSupply = await pool.totalSupply();
   const invariant = await computeInvariant(pool, reserve0, reserve1);
 
-  const factory = await getBasePoolFactory(await pool.factory());
-  const feeTo = await factory.feeRecipient();
+  const master = await getPoolMaster(await pool.master());
+  const feeTo = await master.feeRecipient();
 
   if (feeTo == ZERO_ADDRESS) {
     return {
@@ -124,7 +124,7 @@ async function calculateMintProtocolFee(
   const lastInvariant = await pool.invariantLast();
   if (!lastInvariant.isZero()) {
     if (invariant.gt(lastInvariant)) {
-      const protocolFee = BigNumber.from(await factory.protocolFee());
+      const protocolFee = BigNumber.from(await master.protocolFee(await pool.poolType()));
       const numerator = totalSupply.mul(invariant.sub(lastInvariant)).mul(protocolFee);
       const denominator = MAX_FEE.sub(protocolFee).mul(invariant).add(protocolFee.mul(lastInvariant));
       const liquidity = numerator.div(denominator);
@@ -144,8 +144,13 @@ async function calculateMintProtocolFee(
 }
 
 async function getBasePoolFactory(factoryAddress: string): Promise<Contract> {
-  const factoryArtifact = await hre.artifacts.readArtifact('IBasePoolFactory');
-  return new Contract(factoryAddress, factoryArtifact.abi, hre.ethers.provider);
+  const artifact = await hre.artifacts.readArtifact('IBasePoolFactory');
+  return new Contract(factoryAddress, artifact.abi, hre.ethers.provider);
+}
+
+async function getPoolMaster(factoryAddress: string): Promise<Contract> {
+  const artifact = await hre.artifacts.readArtifact('IPoolMaster');
+  return new Contract(factoryAddress, artifact.abi, hre.ethers.provider);
 }
 
 async function getToken(tokenAddress: string): Promise<Contract> {
@@ -154,8 +159,8 @@ async function getToken(tokenAddress: string): Promise<Contract> {
 }
 
 export async function getSwapFee(pool: Contract): Promise<BigNumber> {
-  const factory = await getBasePoolFactory(await pool.factory());
-  return BigNumber.from(await factory.getSwapFee(pool.address));
+  const master = await getPoolMaster(await pool.master());
+  return BigNumber.from(await master.getSwapFee(pool.address));
 }
 
 export async function calculateLiquidityToMint(

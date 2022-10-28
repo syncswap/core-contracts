@@ -2,7 +2,7 @@
 
 pragma solidity >=0.8.0;
 
-import "../interfaces/IERC20Permit2.sol";
+import "../interfaces/token/IERC20Permit2.sol";
 
 abstract contract SelfPermit {
     function selfPermit(

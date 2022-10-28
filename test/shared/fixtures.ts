@@ -3,6 +3,7 @@ import { expandTo18Decimals, MAX_UINT256, ZERO_ADDRESS } from './utilities';
 import { HardhatRuntimeEnvironment } from 'hardhat/types';
 import { HardhatEthersHelpers } from '@nomiclabs/hardhat-ethers/types';
 import { SignerWithAddress } from '@nomiclabs/hardhat-ethers/signers';
+import { defaultAbiCoder } from 'ethers/lib/utils';
 
 const hre: HardhatRuntimeEnvironment = require("hardhat");
 const ethers: HardhatEthersHelpers = require("hardhat").ethers;
@@ -14,17 +15,30 @@ export async function deployVault(weth: string): Promise<Contract> {
     return contract;
 }
 
-export async function deployConstantProductPoolFactory(vault: string, feeRecipient: string): Promise<Contract> {
-    const contractFactory = await ethers.getContractFactory('ConstantProductPoolFactory');
+export async function deployPoolMaster(vault: string, feeRecipient: string): Promise<Contract> {
+    const contractFactory = await ethers.getContractFactory('SyncSwapPoolMaster');
     const contract = await contractFactory.deploy(vault, feeRecipient);
     await contract.deployed();
     return contract;
 }
 
-export async function deployStablePoolFactory(vault: string, feeRecipient: string): Promise<Contract> {
-    const contractFactory = await ethers.getContractFactory('StablePoolFactory');
-    const contract = await contractFactory.deploy(vault, feeRecipient);
+export async function deployClassicPoolFactory(master: Contract): Promise<Contract> {
+    const contractFactory = await ethers.getContractFactory('SyncSwapClassicPoolFactory');
+    const contract = await contractFactory.deploy(master.address);
     await contract.deployed();
+
+    // whtielist factory
+    await master.setFactoryWhitelisted(contract.address, true);
+    return contract;
+}
+
+export async function deployStablePoolFactory(master: Contract): Promise<Contract> {
+    const contractFactory = await ethers.getContractFactory('SyncSwapStablePoolFactory');
+    const contract = await contractFactory.deploy(master.address);
+    await contract.deployed();
+
+    // whtielist factory
+    await master.setFactoryWhitelisted(contract.address, true);
     return contract;
 }
 
@@ -38,32 +52,36 @@ export async function deploySyncSwapLPToken(totalSupply: BigNumber): Promise<Con
 interface PoolFixture {
     weth: Contract;
     vault: Contract;
+    master: Contract;
     factory: Contract;
     token0: Contract;
     token1: Contract;
     pool: Contract;
 }
 
-export async function constantProductPoolFixture(
+export async function classicPoolFixture(
     wallet: SignerWithAddress,
     feeRecipient: string
 ): Promise<PoolFixture> {
     const weth = await deployWETH9();
     const vault = await deployVault(weth.address);
-    const factory = await deployConstantProductPoolFactory(vault.address, feeRecipient);
+    const master = await deployPoolMaster(vault.address, feeRecipient);
+    const factory = await deployClassicPoolFactory(master);
 
     const tokenA = await deploySyncSwapLPToken(MAX_UINT256);
     const tokenB = await deploySyncSwapLPToken(MAX_UINT256);
+    const data = defaultAbiCoder.encode(
+        ["address", "address"], [tokenA.address, tokenB.address]
+    );
+    await master.createPool(factory.address, data);
 
-    await factory.createPool(tokenA.address, tokenB.address);
-
-    const poolArtifact = await hre.artifacts.readArtifact('ConstantProductPool');
+    const poolArtifact = await hre.artifacts.readArtifact('SyncSwapClassicPool');
     const poolAddress = await factory.getPool(tokenA.address, tokenB.address);
     const pool = new Contract(poolAddress, poolArtifact.abi, ethers.provider).connect(wallet);
 
     const [token0, token1] = Number(tokenA.address) < Number(tokenB.address) ? [tokenA, tokenB] : [tokenB, tokenA];
 
-    return { weth, vault, factory, token0, token1, pool };
+    return { weth, vault, master, factory, token0, token1, pool };
 }
 
 export async function stablePoolFixture(
@@ -72,20 +90,23 @@ export async function stablePoolFixture(
 ): Promise<PoolFixture> {
     const weth = await deployWETH9();
     const vault = await deployVault(weth.address);
-    const factory = await deployStablePoolFactory(vault.address, feeRecipient);
+    const master = await deployPoolMaster(vault.address, feeRecipient);
+    const factory = await deployStablePoolFactory(master);
 
     const tokenA = await deploySyncSwapLPToken(MAX_UINT256);
     const tokenB = await deploySyncSwapLPToken(MAX_UINT256);
+    const data = defaultAbiCoder.encode(
+        ["address", "address"], [tokenA.address, tokenB.address]
+    );
+    await master.createPool(factory.address, data);
 
-    await factory.createPool(tokenA.address, tokenB.address);
-
-    const poolArtifact = await hre.artifacts.readArtifact('StablePool');
+    const poolArtifact = await hre.artifacts.readArtifact('SyncSwapStablePool');
     const poolAddress = await factory.getPool(tokenA.address, tokenB.address);
     const pool = new Contract(poolAddress, poolArtifact.abi, ethers.provider).connect(wallet);
 
     const [token0, token1] = Number(tokenA.address) < Number(tokenB.address) ? [tokenA, tokenB] : [tokenB, tokenA];
 
-    return { weth, vault, factory, token0, token1, pool };
+    return { weth, vault, master, factory, token0, token1, pool };
 }
 
 interface V2Fixture {
@@ -145,26 +166,30 @@ export async function v2Fixture(): Promise<V2Fixture> {
     const WETH = await deployWETH9();
     const WETHPartner = await deployTestERC20(expandTo18Decimals(10000));
 
-    // deploy V2
+    // deploy core
     const vault = await deployVault(WETH.address);
-    const { factory } = await deployConstantProductPoolFactory(vault.address, accounts[1].address);
+    const master = await deployPoolMaster(vault.address, accounts[1].address);
+    const classicFactory = await deployClassicPoolFactory(master);
+    const stableFactory = await deployStablePoolFactory(master);
 
     // deploy routers
-    const router = await deployRouter(factory.address, WETH.address);
+    const router = await deployRouter(classicFactory.address, WETH.address);
 
     // event emitter for testing
-    const routerEventEmitter = await deployRouterEventEmitter(factory.address, WETH.address);
+    const routerEventEmitter = await deployRouterEventEmitter(classicFactory.address, WETH.address);
 
-    // initialize
-    await factory.createPool(tokenA.address, tokenB.address, false);
-    const pairAddress = await factory.getPool(tokenA.address, tokenB.address, false);
+    const data = defaultAbiCoder.encode(
+        ["address", "address"], [tokenA.address, tokenB.address]
+    );
+    await classicFactory.createPool(data);
+    const pairAddress = await classicFactory.getPool(tokenA.address, tokenB.address, false);
     const pairArtifact = await hre.artifacts.readArtifact('SyncSwapPool');;
     const pair = new Contract(pairAddress, pairArtifact.abi, ethers.provider).connect(wallet);
 
     const [token0, token1] = Number(tokenA.address) < Number(tokenB.address) ? [tokenA, tokenB] : [tokenB, tokenA];
 
-    await factory.createPool(WETH.address, WETHPartner.address, false);
-    const WETHPairAddress = await factory.getPool(WETH.address, WETHPartner.address, false);
+    await classicFactory.createPool(data);
+    const WETHPairAddress = await classicFactory.getPool(WETH.address, WETHPartner.address, false);
     const WETHPair = new Contract(WETHPairAddress, pairArtifact.abi, ethers.provider).connect(wallet);
 
     return {
@@ -172,7 +197,7 @@ export async function v2Fixture(): Promise<V2Fixture> {
         token1,
         WETH,
         WETHPartner,
-        factory,
+        factory: classicFactory,
         router,
         routerEventEmitter,
         pair,

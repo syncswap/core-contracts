@@ -3,15 +3,11 @@
 pragma solidity >=0.5.0;
 
 import "./IPool.sol";
-import "./IERC20Permit2.sol";
+import "../token/IERC20Permit2.sol";
 
 interface IBasePool is IPool, IERC20Permit2 {
     function token0() external view returns (address);
     function token1() external view returns (address);
-
-    //function A() external view returns (uint);
-    //function token0PrecisionMultiplier() external view returns (uint);
-    //function token1PrecisionMultiplier() external view returns (uint);
 
     function reserve0() external view returns (uint);
     function reserve1() external view returns (uint);

@@ -2,26 +2,25 @@
 
 pragma solidity ^0.8.0;
 
-import "../../interfaces/IERC20.sol";
+import "../../interfaces/token/IERC20.sol";
 
 import "../BasePoolFactory.sol";
 
-import "./ConstantProductPool.sol";
+import "./SyncSwapClassicPool.sol";
 
-contract ConstantProductPoolFactory is BasePoolFactory {
-    constructor(address _vault, address _feeRecipient) BasePoolFactory(
-        _vault, _feeRecipient, 300, 30000 /// @dev 0.3% swap fee and 30% protocol fee.
-    ) {}
+contract SyncSwapClassicPoolFactory is BasePoolFactory {
+    constructor(address _master) BasePoolFactory(_master) {
+    }
 
     function _deployPool(address token0, address token1) internal override returns (address pool) {
         // Perform sanity check for tokens.
         IERC20(token0).balanceOf(address(this));
         IERC20(token1).balanceOf(address(this));
 
-        bytes memory deployData = abi.encode(token0, token1);
+        bytes memory deployData = abi.encode(master, token0, token1);
         cachedDeployData = deployData;
 
         bytes32 salt = keccak256(deployData);
-        pool = address(new ConstantProductPool{salt: salt}());
+        pool = address(new SyncSwapClassicPool{salt: salt}());
     }
 }

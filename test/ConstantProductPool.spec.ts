@@ -2,7 +2,7 @@ import chai, { expect } from 'chai';
 import { BigNumber, BigNumberish, Contract } from 'ethers';
 import { solidity } from 'ethereum-waffle';
 import { expandTo18Decimals, MINIMUM_LIQUIDITY, ZERO_ADDRESS, ZERO } from './shared/utilities';
-import { constantProductPoolFixture } from './shared/fixtures';
+import { classicPoolFixture } from './shared/fixtures';
 import { HardhatEthersHelpers } from '@nomiclabs/hardhat-ethers/types';
 import { SignerWithAddress } from '@nomiclabs/hardhat-ethers/signers';
 import { calculateLiquidityToMint, calculatePoolTokens, getAmountOut, getSwapFee } from './shared/helper';
@@ -16,6 +16,7 @@ let other: SignerWithAddress;
 
 let weth: Contract;
 let vault: Contract;
+let master: Contract;
 let factory: Contract;
 
 let pool: Contract;
@@ -302,7 +303,7 @@ async function trySwap(
   expect(await balanceOf(tokenOut, pool)).to.eq(poolTokenOutBalanceBefore.sub(amountOut));
 }
 
-describe('Constant Product Pool', () => {
+describe('Classic Pool', () => {
 
   before(async () => {
     const accounts = await ethers.getSigners();
@@ -311,9 +312,10 @@ describe('Constant Product Pool', () => {
   });
 
   beforeEach(async () => {
-    const fixture = await constantProductPoolFixture(wallet, other.address);
+    const fixture = await classicPoolFixture(wallet, other.address);
     weth = fixture.weth;
     vault = fixture.vault;
+    master = fixture.master;
     factory = fixture.factory;
     token0 = fixture.token0;
     token1 = fixture.token1;
@@ -321,7 +323,8 @@ describe('Constant Product Pool', () => {
   });
 
   it("Should returns expected pool metadata", async () => {
-    expect(await pool.factory()).to.eq(factory.address);
+    expect(await pool.master()).to.eq(master.address);
+    expect(await pool.vault()).to.eq(vault.address);
     expect(await pool.token0()).to.eq(token0.address);
     expect(await pool.token1()).to.eq(token1.address);
     expect(await pool.poolType()).to.eq(1);

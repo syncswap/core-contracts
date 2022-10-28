@@ -4,39 +4,30 @@ pragma solidity ^0.8.0;
 
 import "../../libraries/Lock.sol";
 import "../../libraries/Math.sol";
-import "../../libraries/StableMath.sol";
 
-import "../../interfaces/IStablePool.sol";
 import "../../interfaces/IVault.sol";
-import "../../interfaces/IBasePoolFactory.sol";
+import "../../interfaces/IPoolMaster.sol";
+import "../../interfaces/factory/IPoolFactory.sol";
+import "../../interfaces/pool/IClassicPool.sol";
 
 import "../SyncSwapLPToken.sol";
 
-error InsufficientInputAmount();
 error InsufficientLiquidityMinted();
 
-contract StablePool is IStablePool, SyncSwapLPToken, Lock {
+contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
     using Math for uint;
 
     uint private constant MINIMUM_LIQUIDITY = 1000;
     uint private constant MAX_FEE = 1e5; /// @dev 100%.
 
-    /// @dev Pool type `2` for stable pools.
-    uint16 public constant override poolType = 2;
+    /// @dev Pool type `1` for classic pools.
+    uint16 public constant poolType = 1;
 
-    address public immutable override factory;
+    address public immutable override master;
     address public immutable override vault;
 
     address public immutable override token0;
     address public immutable override token1;
-
-    /// @dev Multipliers for each pooled token's precision to get to the pool precision decimals
-    /// which is agnostic to the pool, but usually is 18.
-    /// For example, TBTC has 18 decimals, so the multiplier should be 10 ** (18 - 18) = 1.
-    /// WBTC has 8, so the multiplier should be 10 ** (18 - 8) => 10 ** 10.
-    /// The value is only for stable pools, and has no effects on non-stable pools.
-    uint public immutable override token0PrecisionMultiplier;
-    uint public immutable override token1PrecisionMultiplier;
 
     /// @dev Pool reserve of each pool token as of immediately after the most recent balance event.
     /// The value is used to measure growth in invariant on mints and input tokens on swaps.
@@ -50,11 +41,11 @@ contract StablePool is IStablePool, SyncSwapLPToken, Lock {
 
     /// @dev Factory must ensures that the parameters are valid.
     constructor() {
-        factory = msg.sender;
-        vault = IBasePoolFactory(msg.sender).vault();
-        
-        (bytes memory _deployData) = IBasePoolFactory(msg.sender).getDeployData();
-        (token0, token1, token0PrecisionMultiplier, token1PrecisionMultiplier) = abi.decode(_deployData, (address, address, uint, uint));
+        (bytes memory _deployData) = IPoolFactory(msg.sender).getDeployData();
+        (address _master, address _token0, address _token1) = abi.decode(_deployData, (address, address, address));
+
+        vault = IPoolMaster(_master).vault();
+        (master, token0, token1) = (_master, _token0, _token1);
     }
 
     function getAssets() external view override returns (address[] memory assets) {
@@ -257,7 +248,7 @@ contract StablePool is IStablePool, SyncSwapLPToken, Lock {
     }
 
     function _getSwapFee() private view returns (uint24 _swapFee) {
-        _swapFee = IBasePoolFactory(factory).getSwapFee(address(this));
+        _swapFee = IPoolMaster(master).getSwapFee(address(this));
     }
 
     /// @dev This fee is charged to cover for the swap fee when users add unbalanced liquidity.
@@ -283,7 +274,7 @@ contract StablePool is IStablePool, SyncSwapLPToken, Lock {
         _totalSupply = totalSupply;
         _invariant = _computeInvariant(_reserve0, _reserve1);
 
-        address _feeRecipient = IBasePoolFactory(factory).feeRecipient();
+        address _feeRecipient = IPoolMaster(master).feeRecipient();
         _feeOn = (_feeRecipient != address(0));
 
         uint _invariantLast = invariantLast;
@@ -291,7 +282,7 @@ contract StablePool is IStablePool, SyncSwapLPToken, Lock {
             if (_feeOn) {
                 if (_invariant > _invariantLast) {
                     /// @dev Mints `protocolFee` % of growth in liquidity (invariant).
-                    uint _protocolFee = IBasePoolFactory(factory).protocolFee();
+                    uint _protocolFee = IPoolMaster(master).protocolFee(poolType);
                     uint _numerator = _totalSupply * (_invariant - _invariantLast) * _protocolFee;
                     uint _denominator = (MAX_FEE - _protocolFee) * _invariant + _protocolFee * _invariantLast;
                     uint _liquidity = _numerator / _denominator;
@@ -331,23 +322,11 @@ contract StablePool is IStablePool, SyncSwapLPToken, Lock {
         if (_amountIn == 0) {
             _dy = 0;
         } else {
-            unchecked {
-                uint _adjustedReserve0 = _reserve0 * token0PrecisionMultiplier;
-                uint _adjustedReserve1 = _reserve1 * token1PrecisionMultiplier;
-                uint _feeDeductedAmountIn = _amountIn - (_amountIn * _getSwapFee()) / MAX_FEE;
-                uint _d = StableMath.computeDFromAdjustedBalances(_adjustedReserve0, _adjustedReserve1);
-
-                if (_token0In) {
-                    uint _x = _adjustedReserve0 + (_feeDeductedAmountIn * token0PrecisionMultiplier);
-                    uint _y = StableMath.getY(_x, _d);
-                    _dy = _adjustedReserve1 - _y - 1;
-                    _dy /= token1PrecisionMultiplier;
-                } else {
-                    uint _x = _adjustedReserve1 + (_feeDeductedAmountIn * token1PrecisionMultiplier);
-                    uint _y = StableMath.getY(_x, _d);
-                    _dy = _adjustedReserve0 - _y - 1;
-                    _dy /= token0PrecisionMultiplier;
-                }
+            uint _amountInWithFee = _amountIn * (MAX_FEE - _getSwapFee());
+            if (_token0In) {
+                _dy = (_amountInWithFee * _reserve1) / (_reserve0 * MAX_FEE + _amountInWithFee);
+            } else {
+                _dy = (_amountInWithFee * _reserve0) / (_reserve1 * MAX_FEE + _amountInWithFee);
             }
         }
     }
@@ -361,41 +340,15 @@ contract StablePool is IStablePool, SyncSwapLPToken, Lock {
         if (_amountOut == 0) {
             _dx = 0;
         } else {
-            unchecked {
-                uint _adjustedReserve0 = _reserve0 * token0PrecisionMultiplier;
-                uint _adjustedReserve1 = _reserve1 * token1PrecisionMultiplier;
-                uint _d = StableMath.computeDFromAdjustedBalances(_adjustedReserve0, _adjustedReserve1);
-
-                if (_token0Out) {
-                    uint _y = _adjustedReserve0 - _amountOut;
-                    if (_y <= 1) {
-                        return 1;
-                    }
-                    uint _x = StableMath.getY(_y, _d);
-                    _dx = MAX_FEE * (_x - _adjustedReserve1) / (MAX_FEE - _getSwapFee()) + 1;
-                    _dx /= token1PrecisionMultiplier;
-                } else {
-                    uint _y = _adjustedReserve1 - _amountOut;
-                    if (_y <= 1) {
-                        return 1;
-                    }
-                    uint _x = StableMath.getY(_y, _d);
-                    _dx = MAX_FEE * (_x - _adjustedReserve0) / (MAX_FEE - _getSwapFee()) + 1;
-                    _dx /= token0PrecisionMultiplier;
-                }
+            if (_token0Out) {
+                _dx = (_reserve1 * _amountOut * MAX_FEE) / ((_reserve0 - _amountOut) * (MAX_FEE - _getSwapFee())) + 1;
+            } else {
+                _dx = (_reserve0 * _amountOut * MAX_FEE) / ((_reserve1 - _amountOut) * (MAX_FEE - _getSwapFee())) + 1;
             }
         }
     }
 
-    function _computeInvariant(uint _reserve0, uint _reserve1) private view returns (uint _invariant) {
-        /// @dev Get D, the StableSwap invariant, based on a set of balances and a particular A.
-        /// See the StableSwap paper for details.
-        /// Originally https://github.com/saddle-finance/saddle-contract/blob/0b76f7fb519e34b878aa1d58cffc8d8dc0572c12/contracts/SwapUtils.sol#L319.
-        /// Returns the invariant, at the precision of the pool.
-        unchecked {
-            uint _adjustedReserve0 = _reserve0 * token0PrecisionMultiplier;
-            uint _adjustedReserve1 = _reserve1 * token1PrecisionMultiplier;
-            _invariant = StableMath.computeDFromAdjustedBalances(_adjustedReserve0, _adjustedReserve1);
-        }
+    function _computeInvariant(uint _reserve0, uint _reserve1) private pure returns (uint _invariant) {
+        _invariant = (_reserve0 * _reserve1).sqrt();
     }
 }
