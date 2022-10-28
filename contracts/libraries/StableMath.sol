@@ -13,17 +13,21 @@ library StableMath {
     /// @param x The new total amount of FROM token.
     /// @return y The amount of TO token that should remain in the pool.
     function getY(uint x, uint d) internal pure returns (uint y) {
-        uint c = (d * d) / (x * 2);
-        c = (c * d) / 1600000;
+        //uint c = (d * d) / (x * 2);
+        uint c = Math.mulDiv(d, d, Math.mulUnsafeFirst(2, x));
+        //c = (c * d) / 4000;
+        c = Math.mulDivUnsafeLast(c, d, 4000);
     
-        uint b = x + (d / 800000);
+        //uint b = x + (d / 2000);
+        uint b = x + Math.divUnsafeLast(d, 2000);
         uint yPrev;
         y = d;
-    
+
         /// @dev Iterative approximation.
         for (uint i; i < 256; ) {
             yPrev = y;
-            y = (y * y + c) / (y * 2 + b - d);
+            //y = (y * y + c) / (y * 2 + b - d);
+            y = Math.div(Math.mul(y, y) + c, Math.mulUnsafeFirst(2, y) + b - d);
 
             if (Math.within1(y, yPrev)) {
                 break;
@@ -45,9 +49,16 @@ library StableMath {
             uint d = s;
 
             for (uint i; i < 256; ) {
-                uint _dP = (((d * d) / xp0) * d) / xp1 / 4;
+                //uint dP = (((d * d) / xp0) * d) / xp1 / 4;
+                uint dP = Math.divUnsafeLast(Math.mulDiv(Math.mulDiv(d, d, xp0), d, xp1), 4);
                 prevD = d;
-                d = (((800000 * s) + 2 * _dP) * d) / ((800000 - 1) * d + 3 * _dP);
+                //d = (((2000 * s) + 2 * dP) * d) / ((2000 - 1) * d + 3 * dP);
+                d = Math.mulDivUnsafeFirst(
+                    // `s` cannot be zero and this value will never be zero.
+                    Math.mulUnsafeFirst(2000, s) + Math.mulUnsafeFirst(2, dP),
+                    d,
+                    Math.mulUnsafeFirst(1999, d) + Math.mulUnsafeFirst(3, dP)
+                );
 
                 if (Math.within1(d, prevD)) {
                     break;

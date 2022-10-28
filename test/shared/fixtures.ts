@@ -1,5 +1,5 @@
 import { BigNumber, Contract } from 'ethers';
-import { expandTo18Decimals, ZERO_ADDRESS } from './utilities';
+import { expandTo18Decimals, MAX_UINT256, ZERO_ADDRESS } from './utilities';
 import { HardhatRuntimeEnvironment } from 'hardhat/types';
 import { HardhatEthersHelpers } from '@nomiclabs/hardhat-ethers/types';
 import { SignerWithAddress } from '@nomiclabs/hardhat-ethers/signers';
@@ -7,9 +7,23 @@ import { SignerWithAddress } from '@nomiclabs/hardhat-ethers/signers';
 const hre: HardhatRuntimeEnvironment = require("hardhat");
 const ethers: HardhatEthersHelpers = require("hardhat").ethers;
 
-export async function deployFactory(feeRecipient: string): Promise<Contract> {
-    const contractFactory = await ethers.getContractFactory('SyncSwapFactory');
-    const contract = await contractFactory.deploy(feeRecipient);
+export async function deployVault(weth: string): Promise<Contract> {
+    const contractFactory = await ethers.getContractFactory('SyncSwapVault');
+    const contract = await contractFactory.deploy(weth);
+    await contract.deployed();
+    return contract;
+}
+
+export async function deployConstantProductPoolFactory(vault: string, feeRecipient: string): Promise<Contract> {
+    const contractFactory = await ethers.getContractFactory('ConstantProductPoolFactory');
+    const contract = await contractFactory.deploy(vault, feeRecipient);
+    await contract.deployed();
+    return contract;
+}
+
+export async function deployStablePoolFactory(vault: string, feeRecipient: string): Promise<Contract> {
+    const contractFactory = await ethers.getContractFactory('StablePoolFactory');
+    const contract = await contractFactory.deploy(vault, feeRecipient);
     await contract.deployed();
     return contract;
 }
@@ -21,34 +35,57 @@ export async function deploySyncSwapLPToken(totalSupply: BigNumber): Promise<Con
     return contract;
 }
 
-interface PairFixture {
+interface PoolFixture {
+    weth: Contract;
+    vault: Contract;
     factory: Contract;
     token0: Contract;
     token1: Contract;
-    volatilePair: Contract;
-    stablePair: Contract;
+    pool: Contract;
 }
 
-export async function pairFixture(wallet: SignerWithAddress, feeRecipient: SignerWithAddress): Promise<PairFixture> {
-    const factory = await deployFactory(feeRecipient.address);
+export async function constantProductPoolFixture(
+    wallet: SignerWithAddress,
+    feeRecipient: string
+): Promise<PoolFixture> {
+    const weth = await deployWETH9();
+    const vault = await deployVault(weth.address);
+    const factory = await deployConstantProductPoolFactory(vault.address, feeRecipient);
 
-    const tokenA = await deploySyncSwapLPToken(expandTo18Decimals('100000000000000000000'));
-    const tokenB = await deploySyncSwapLPToken(expandTo18Decimals('100000000000000000000'));
+    const tokenA = await deploySyncSwapLPToken(MAX_UINT256);
+    const tokenB = await deploySyncSwapLPToken(MAX_UINT256);
 
-    await factory.createPool(tokenA.address, tokenB.address, true);
-    await factory.createPool(tokenA.address, tokenB.address, false);
+    await factory.createPool(tokenA.address, tokenB.address);
 
-    const pairArtifact = await hre.artifacts.readArtifact('SyncSwapPool');
-
-    const stablePairAddress = await factory.getPool(tokenA.address, tokenB.address, true);
-    const stablePair = new Contract(stablePairAddress, pairArtifact.abi, ethers.provider).connect(wallet);
-
-    const volatilePairAddress = await factory.getPool(tokenA.address, tokenB.address, false);
-    const volatilePair = new Contract(volatilePairAddress, pairArtifact.abi, ethers.provider).connect(wallet);
+    const poolArtifact = await hre.artifacts.readArtifact('ConstantProductPool');
+    const poolAddress = await factory.getPool(tokenA.address, tokenB.address);
+    const pool = new Contract(poolAddress, poolArtifact.abi, ethers.provider).connect(wallet);
 
     const [token0, token1] = Number(tokenA.address) < Number(tokenB.address) ? [tokenA, tokenB] : [tokenB, tokenA];
 
-    return { factory, token0, token1, stablePair, volatilePair };
+    return { weth, vault, factory, token0, token1, pool };
+}
+
+export async function stablePoolFixture(
+    wallet: SignerWithAddress,
+    feeRecipient: string
+): Promise<PoolFixture> {
+    const weth = await deployWETH9();
+    const vault = await deployVault(weth.address);
+    const factory = await deployStablePoolFactory(vault.address, feeRecipient);
+
+    const tokenA = await deploySyncSwapLPToken(MAX_UINT256);
+    const tokenB = await deploySyncSwapLPToken(MAX_UINT256);
+
+    await factory.createPool(tokenA.address, tokenB.address);
+
+    const poolArtifact = await hre.artifacts.readArtifact('StablePool');
+    const poolAddress = await factory.getPool(tokenA.address, tokenB.address);
+    const pool = new Contract(poolAddress, poolArtifact.abi, ethers.provider).connect(wallet);
+
+    const [token0, token1] = Number(tokenA.address) < Number(tokenB.address) ? [tokenA, tokenB] : [tokenB, tokenA];
+
+    return { weth, vault, factory, token0, token1, pool };
 }
 
 interface V2Fixture {
@@ -109,7 +146,8 @@ export async function v2Fixture(): Promise<V2Fixture> {
     const WETHPartner = await deployTestERC20(expandTo18Decimals(10000));
 
     // deploy V2
-    const { factory } = await deployFactory(accounts[1].address);
+    const vault = await deployVault(WETH.address);
+    const { factory } = await deployConstantProductPoolFactory(vault.address, accounts[1].address);
 
     // deploy routers
     const router = await deployRouter(factory.address, WETH.address);

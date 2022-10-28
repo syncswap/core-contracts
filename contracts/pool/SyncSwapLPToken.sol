@@ -7,6 +7,7 @@ import "../libraries/SignatureChecker.sol";
 import "../interfaces/IERC20Permit2.sol";
 
 error Expired();
+error InvalidSignature();
 
 /**
  * @dev A simple ERC20 implementation for pool's liquidity token, supports permit by both ECDSA signatures from
@@ -134,7 +135,11 @@ contract SyncSwapLPToken is IERC20Permit2 {
     ) external override ensures(_deadline) {
         bytes32 _hash = _permitHash(_owner, _spender, _amount, _deadline);
         address _recoveredAddress = ecrecover(_hash, _v, _r, _s);
-        require(_recoveredAddress != address(0) && _recoveredAddress == _owner, "S"); // SIGNATURE
+
+        if (_recoveredAddress == address(0) || _recoveredAddress != _owner) {
+            revert InvalidSignature();
+        }
+
         _approve(_owner, _spender, _amount);
     }
 
@@ -146,7 +151,11 @@ contract SyncSwapLPToken is IERC20Permit2 {
         bytes calldata _signature
     ) external override ensures(_deadline) {
         bytes32 _hash = _permitHash(_owner, _spender, _amount, _deadline);
-        require(SignatureChecker.isValidSignatureNow(_owner, _hash, _signature), "S"); // SIGNATURE
+
+        if (!SignatureChecker.isValidSignatureNow(_owner, _hash, _signature)) {
+            revert InvalidSignature();
+        }
+
         _approve(_owner, _spender, _amount);
     }
 }

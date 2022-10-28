@@ -5,13 +5,13 @@ pragma solidity ^0.8.0;
 import "../../libraries/Lock.sol";
 import "../../libraries/Math.sol";
 
-import "../../interfaces/IConstantProductPool.sol";
 import "../../interfaces/IVault.sol";
 import "../../interfaces/IBasePoolFactory.sol";
+import "../../interfaces/IConstantProductPool.sol";
 
 import "../SyncSwapLPToken.sol";
 
-error InsufficientInputAmount();
+error InsufficientOutputAmount();
 error InsufficientLiquidityMinted();
 
 contract ConstantProductPool is IConstantProductPool, SyncSwapLPToken, Lock {
@@ -21,10 +21,10 @@ contract ConstantProductPool is IConstantProductPool, SyncSwapLPToken, Lock {
     uint private constant MAX_FEE = 1e5; /// @dev 100%.
 
     /// @dev Pool type `1` for constant product pools.
-    uint24 public constant poolType = 1;
+    uint16 public constant poolType = 1;
 
     address public immutable override factory;
-    address private immutable vault;
+    address public immutable override vault;
 
     address public immutable override token0;
     address public immutable override token1;
@@ -108,7 +108,6 @@ contract ConstantProductPool is IConstantProductPool, SyncSwapLPToken, Lock {
         uint _liquidity = balanceOf[address(this)];
 
         // Mints protocol fee if any.
-        // TODO can they mess up the pool if transferred some unbalanced tokens on purpose?
         (bool _feeOn, uint _totalSupply, ) = _mintProtocolFee(_balance0, _balance1);
 
         // Calculates amounts of pool tokens proportional to balances.
@@ -168,7 +167,6 @@ contract ConstantProductPool is IConstantProductPool, SyncSwapLPToken, Lock {
             _amountOut = _amount1;
             _amount0 = 0;
             _balance1 -= _amount1;
-            // TODO Check gas if emit burn event here.
         } else {
             // Swap `token1` for `token0`.
             require(_tokenOut == token0); // ensures to prevent from messing up the pool with bad parameters.

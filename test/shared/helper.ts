@@ -19,18 +19,20 @@ function sqrt(value: BigNumber): BigNumber {
   return y;
 }
 
+const STABLE_A = BigNumber.from(1000);
+
 async function computeInvariant(
   pool: Contract,
   balance0: BigNumber,
   balance1: BigNumber
 ): Promise<BigNumber> {
-  const A = await pool.A();
-  if (A.isZero()) {
+  const poolType = await pool.poolType();
+  if (poolType == 1) {
     return sqrt(balance0.mul(balance1));
   } else {
     const adjustedReserve0 = balance0.mul(await pool.token0PrecisionMultiplier());
     const adjustedReserve1 = balance1.mul(await pool.token1PrecisionMultiplier());
-    return computeDFromAdjustedBalances(A, adjustedReserve0, adjustedReserve1);
+    return computeDFromAdjustedBalances(STABLE_A, adjustedReserve0, adjustedReserve1);
   }
 }
 
@@ -108,8 +110,9 @@ async function calculateMintProtocolFee(
   const totalSupply = await pool.totalSupply();
   const invariant = await computeInvariant(pool, reserve0, reserve1);
 
-  const factory = await getFactory(await pool.factory());
+  const factory = await getBasePoolFactory(await pool.factory());
   const feeTo = await factory.feeRecipient();
+
   if (feeTo == ZERO_ADDRESS) {
     return {
       totalSupply,
@@ -140,8 +143,8 @@ async function calculateMintProtocolFee(
   };
 }
 
-async function getFactory(factoryAddress: string): Promise<Contract> {
-  const factoryArtifact = await hre.artifacts.readArtifact('SyncSwapFactory');
+async function getBasePoolFactory(factoryAddress: string): Promise<Contract> {
+  const factoryArtifact = await hre.artifacts.readArtifact('IBasePoolFactory');
   return new Contract(factoryAddress, factoryArtifact.abi, hre.ethers.provider);
 }
 
@@ -151,11 +154,12 @@ async function getToken(tokenAddress: string): Promise<Contract> {
 }
 
 export async function getSwapFee(pool: Contract): Promise<BigNumber> {
-  const factory = await getFactory(await pool.factory());
+  const factory = await getBasePoolFactory(await pool.factory());
   return BigNumber.from(await factory.getSwapFee(pool.address));
 }
 
 export async function calculateLiquidityToMint(
+  vault: Contract,
   pool: Contract,
   amount0In: BigNumber,
   amount1In: BigNumber
@@ -170,8 +174,8 @@ export async function calculateLiquidityToMint(
 
   const token0 = await getToken(await pool.token0());
   const token1 = await getToken(await pool.token1());
-  const balance0 = await token0.balanceOf(pool.address);
-  const balance1 = await token1.balanceOf(pool.address);
+  const balance0 = await vault.balanceOf(token0.address, pool.address);
+  const balance1 = await vault.balanceOf(token1.address, pool.address);
 
   const newInvariant = await computeInvariant(pool, balance0, balance1);
   const swapFee = await getSwapFee(pool);

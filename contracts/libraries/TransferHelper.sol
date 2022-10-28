@@ -2,7 +2,6 @@
 
 pragma solidity ^0.8.0;
 
-// TODO
 error SafeApproveFailed();
 error SafeTransferFailed();
 error SafeTransferFromFailed();
@@ -19,10 +18,9 @@ library TransferHelper {
         // solhint-disable-next-line avoid-low-level-calls
         (bool success, bytes memory data) = token.call(abi.encodeWithSelector(0x095ea7b3, to, value));
 
-        require(
-            success && (data.length == 0 || abi.decode(data, (bool))),
-            "Y"
-        );
+        if (!success || (data.length != 0 && !abi.decode(data, (bool)))) {
+            revert SafeApproveFailed();
+        }
     }
 
     function safeTransfer(
@@ -33,10 +31,10 @@ library TransferHelper {
         // bytes4(keccak256(bytes("transfer(address,uint256)")));
         // solhint-disable-next-line avoid-low-level-calls
         (bool success, bytes memory data) = token.call(abi.encodeWithSelector(0xa9059cbb, to, value));
-        require(
-            success && (data.length == 0 || abi.decode(data, (bool))),
-            "T"
-        );
+
+        if (!success || (data.length != 0 && !abi.decode(data, (bool)))) {
+            revert SafeTransferFailed();
+        }
     }
 
     function safeTransferFrom(
@@ -48,15 +46,18 @@ library TransferHelper {
         // bytes4(keccak256(bytes("transferFrom(address,address,uint256)")));
         // solhint-disable-next-line avoid-low-level-calls
         (bool success, bytes memory data) = token.call(abi.encodeWithSelector(0x23b872dd, from, to, value));
-        require(
-            success && (data.length == 0 || abi.decode(data, (bool))),
-            "W"
-        );
+
+        if (!success || (data.length != 0 && !abi.decode(data, (bool)))) {
+            revert SafeTransferFromFailed();
+        }
     }
 
     function safeTransferETH(address to, uint256 value) internal {
         // solhint-disable-next-line avoid-low-level-calls
         (bool success, ) = to.call{value: value}(new bytes(0));
-        require(success, "C");
+
+        if (!success) {
+            revert SafeTransferETHFailed();
+        }
     }
 }

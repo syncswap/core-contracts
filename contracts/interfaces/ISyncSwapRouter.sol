@@ -3,7 +3,6 @@
 pragma solidity >=0.5.0;
 
 interface ISyncSwapRouter {
-
     struct SwapStep {
         address pool;
         bytes data;

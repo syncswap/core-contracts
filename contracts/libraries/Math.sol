@@ -74,7 +74,7 @@ library Math {
         uint256 x,
         uint256 y,
         uint256 denominator
-    ) external pure returns (uint256 z) {
+    ) internal pure returns (uint256 z) {
         assembly {
             // Store x * y in z for now.
             z := mul(x, y)
@@ -95,7 +95,7 @@ library Math {
         uint256 x,
         uint256 y,
         uint256 denominator
-    ) external pure returns (uint256 z) {
+    ) internal pure returns (uint256 z) {
         assembly {
             // Store x * y in z for now.
             z := mul(x, y)
@@ -116,7 +116,7 @@ library Math {
         uint256 x,
         uint256 y,
         uint256 denominator
-    ) external pure returns (uint256 z) {
+    ) internal pure returns (uint256 z) {
         assembly {
             // Store x * y in z for now.
             z := mul(x, y)
@@ -133,11 +133,11 @@ library Math {
 
     /// @dev Rounded down.
     /// This function assumes that both `x` and `denominator` are not zero, and must be checked externally.
-    function mulDivUnsafeBoth(
+    function mulDivUnsafeFirstLast(
         uint256 x,
         uint256 y,
         uint256 denominator
-    ) external pure returns (uint256 z) {
+    ) internal pure returns (uint256 z) {
         assembly {
             // Store x * y in z for now.
             z := mul(x, y)

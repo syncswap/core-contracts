@@ -49,7 +49,10 @@ module.exports = {
     // Run compile task with this network to generate normal artifacts.
     // Example: `yarn hardhat compile --network hardhat`
     hardhat: {
-      chainId: 280
+      chainId: 280,
+      gasMultiplier: 0,
+      gasPrice: 0,
+      initialBaseFeePerGas: 0
     },
 
     // Run compile task with this network to generate `artifacts-zk` and `cache-zk`.

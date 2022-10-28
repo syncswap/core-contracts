@@ -3,6 +3,10 @@
 pragma solidity >=0.5.0;
 
 interface IVault {
+    function wETH() external view returns (address);
+
+    function reserves(address token) external view returns (uint reserve);
+
     function balanceOf(address token, address owner) external view returns (uint balance);
 
     function deposit(address token, address to) external payable returns (uint amount);

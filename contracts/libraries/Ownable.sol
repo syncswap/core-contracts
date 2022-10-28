@@ -2,6 +2,9 @@
 
 pragma solidity ^0.8.0;
 
+error NotOwner();
+error NotPendingOwner();
+
 abstract contract Ownable {
     address public owner;
     address public pendingOwner;
@@ -13,7 +16,9 @@ abstract contract Ownable {
     }
 
     modifier onlyOwner() {
-        require(owner == msg.sender, "Not owner");
+        if (owner != msg.sender) {
+            revert NotOwner();
+        }
         _;
     }
 
@@ -23,13 +28,11 @@ abstract contract Ownable {
 
     function acceptOwnership() external {
         address _pendingOwner = pendingOwner;
-        require(msg.sender == _pendingOwner, "Not pending owner");
-        owner = _pendingOwner;
+        if (msg.sender != _pendingOwner) {
+            revert NotPendingOwner();
+        }
+        _transferOwnership(_pendingOwner);
         delete pendingOwner;
-    }
-
-    function transferOwnership(address newOwner) public onlyOwner {
-        _transferOwnership(newOwner);
     }
 
     function _transferOwnership(address newOwner) private {

@@ -18,8 +18,8 @@ interface IBasePool is IPool, IERC20Permit2 {
     function invariantLast() external view returns (uint);
 
     function getReserves() external view returns (uint, uint);
-    function getAmountOut(address tokenIn, uint amountIn) external view returns (uint finalAmountOut);
-    function getAmountIn(address tokenOut, uint256 amountOut) external view returns (uint finalAmountIn);
+    function getAmountOut(address tokenIn, uint amountIn) external view returns (uint amountOut);
+    function getAmountIn(address tokenOut, uint amountOut) external view returns (uint amountIn);
 
     event Mint(
         address indexed sender,
