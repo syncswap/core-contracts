@@ -116,7 +116,7 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
     /// @dev Burns LP tokens sent to this contract.
     /// The router should ensure that sufficient pool tokens are received.
     function burn(bytes calldata _data) external override lock returns (TokenAmount[] memory _amounts) {
-        (address _to, bool _withdraw) = abi.decode(_data, (address, bool));
+        (address _to, uint8 _withdrawMode) = abi.decode(_data, (address, uint8));
         (uint _balance0, uint _balance1) = _balances();
         uint _liquidity = balanceOf[address(this)];
 
@@ -130,8 +130,8 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
 
         // Burns liquidity and transfers pool tokens.
         _burn(address(this), _liquidity);
-        _transferTokens(token0, _to, _amount0, _withdraw);
-        _transferTokens(token1, _to, _amount1, _withdraw);
+        _transferTokens(token0, _to, _amount0, _withdrawMode);
+        _transferTokens(token1, _to, _amount1, _withdrawMode);
 
         // Update reserves and last invariant with up-to-date balances (after transfers).
         /// @dev Using counterfactuals balances here to save gas.
@@ -157,7 +157,7 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
     /// - i.e., the user gets a single token out by burning LP tokens.
     /// The router should ensure that sufficient pool tokens are received.
     function burnSingle(bytes calldata _data) external override lock returns (uint _amountOut) {
-        (address _tokenOut, address _to, bool _withdraw) = abi.decode(_data, (address, address, bool));
+        (address _tokenOut, address _to, uint8 _withdrawMode) = abi.decode(_data, (address, address, uint8));
         (uint _balance0, uint _balance1) = _balances();
         uint _liquidity = balanceOf[address(this)];
 
@@ -176,7 +176,7 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
         if (_tokenOut == token1) {
             // Swap `token0` for `token1`.
             _amount1 += _getAmountOut(_amount0, _balance0 - _amount0, _balance1 - _amount1, true);
-            _transferTokens(token1, _to, _amount1, _withdraw);
+            _transferTokens(token1, _to, _amount1, _withdrawMode);
             _amountOut = _amount1;
             _amount0 = 0;
             _balance1 -= _amount1;
@@ -184,7 +184,7 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
             // Swap `token1` for `token0`.
             require(_tokenOut == token0); // ensures to prevent from messing up the pool with bad parameters.
             _amount0 += _getAmountOut(_amount1, _balance0 - _amount0, _balance1 - _amount1, false);
-            _transferTokens(token0, _to, _amount0, _withdraw);
+            _transferTokens(token0, _to, _amount0, _withdrawMode);
             _amountOut = _amount0;
             _amount1 = 0;
             _balance0 -= _amount0;
@@ -204,7 +204,7 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
     /// @dev Swaps one token for another - should be called via the router after transferring input tokens.
     /// The router should ensure that sufficient output tokens are received.
     function swap(bytes calldata _data) external override lock returns (uint _amountOut) {
-        (address _tokenIn, address _to, bool _withdraw) = abi.decode(_data, (address, address, bool));
+        (address _tokenIn, address _to, uint8 _withdrawMode) = abi.decode(_data, (address, address, uint8));
         (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
         (uint _balance0, uint _balance1) = _balances();
 
@@ -235,7 +235,7 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
         }
 
         // Transfers output tokens.
-        _transferTokens(_tokenOut, _to, _amountOut, _withdraw);
+        _transferTokens(_tokenOut, _to, _amountOut, _withdrawMode);
 
         // Update reserves with up-to-date balances (updated above).
         /// @dev Using counterfactuals balances here to save gas.
@@ -247,11 +247,11 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
         emit Sync(_balance0, _balance1);
     }
 
-    function _transferTokens(address token, address to, uint amount, bool withdraw) private {
-        if (withdraw) {
-            IVault(vault).withdraw(token, to, amount);
-        } else {
+    function _transferTokens(address token, address to, uint amount, uint8 withdrawMode) private {
+        if (withdrawMode == 0) {
             IVault(vault).transfer(token, to, amount);
+        } else {
+            IVault(vault).withdrawAlternative(token, to, amount, withdrawMode == 1);
         }
     }
 

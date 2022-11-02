@@ -239,7 +239,7 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
         );
     }
 
-    function removeLiquiditySingleWithPermit(
+    function burnLiquiditySingleWithPermit(
         address pool,
         uint liquidity,
         bytes memory data,
@@ -285,7 +285,7 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
             // Cache steps length.
             stepsLength = path.steps.length;
 
-            for (j; j < stepsLength; ) {
+            for (; j < stepsLength; ) {
                 if (j < stepsLength - 1) {
                     // Swap and send tokens to the next step.
                     IBasePool(step.pool).swap(step.data);

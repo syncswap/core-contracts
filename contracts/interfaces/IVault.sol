@@ -11,9 +11,15 @@ interface IVault {
 
     function deposit(address token, address to) external payable returns (uint amount);
 
+    function depositETH(address to) external payable returns (uint amount);
+
     function receiveAndDeposit(address token, address to, uint amount) external payable;
 
     function transfer(address token, address to, uint amount) external;
 
     function withdraw(address token, address to, uint amount) external;
+
+    function withdrawAlternative(address token, address to, uint amount, bool unwrapETH) external;
+
+    function withdrawETH(address to, uint amount) external;
 }

@@ -37,8 +37,12 @@ contract SyncSwapVault is IVault, Lock {
         return balances[token][owner];
     }
 
+    // Deposit
+
     function deposit(address token, address to) public payable override lock returns (uint amount) {
-        if (token == NATIVE_ETH) {
+        if (msg.value != 0/*token == NATIVE_ETH*/) {
+            //require(token == NATIVE_ETH);
+
             // Use `msg.value` as amount for native ETH.
             amount = msg.value;
         } else {
@@ -69,19 +73,38 @@ contract SyncSwapVault is IVault, Lock {
         }
     }
 
+    function depositETH(address to) external payable override lock returns (uint amount) {
+        // Use `msg.value` as amount for native ETH.
+        amount = msg.value;
+
+        // Increase token reserve.
+        reserves[NATIVE_ETH] += amount;
+
+        // Increase token balance for recipient.
+        unchecked {
+            /// `balances` cannot overflow if `reserves` doesn't overflow.
+            balances[NATIVE_ETH][to] += amount;
+        }
+    }
+
     function receiveAndDeposit(address token, address to, uint amount) external payable override lock {
-        if (token == NATIVE_ETH) {
+        if (msg.value != 0/*token == NATIVE_ETH*/) {
+            //require(token == NATIVE_ETH);
             require(amount == msg.value);
         } else {
-            // Receive ERC20 tokens from sender.
-            TransferHelper.safeTransferFrom(token, msg.sender, address(this), amount);
-
             if (token == wETH) {
                 // Ensure the same `reserves` and `balances` as native ETH.
                 token = NATIVE_ETH;
 
+                // Receive wETH from sender.
+                IWETH(wETH).transferFrom(msg.sender, address(this), amount);
+
                 // Unwrap wETH to native ETH.
                 IWETH(wETH).withdraw(amount);
+            } else {
+                // TODO diff to ensure real amount?
+                // Receive ERC20 tokens from sender.
+                TransferHelper.safeTransferFrom(token, msg.sender, address(this), amount);
             }
         }
 
@@ -94,6 +117,8 @@ contract SyncSwapVault is IVault, Lock {
             balances[token][to] += amount;
         }
     }
+
+    // Transfer
 
     function transfer(address token, address to, uint amount) external override lock {
         // Ensure the same `reserves` and `balances` as native ETH.
@@ -110,6 +135,8 @@ contract SyncSwapVault is IVault, Lock {
             balances[token][to] += amount;
         }
     }
+
+    // Withdraw
 
     function withdraw(address token, address to, uint amount) external override lock {
         if (token == NATIVE_ETH) {
@@ -138,6 +165,64 @@ contract SyncSwapVault is IVault, Lock {
         unchecked {
             /// `reserves` cannot underflow if `balances` doesn't underflow.
             reserves[token] -= amount;
+        }
+    }
+
+    // Withdraw native ETH or wETH if possible, otherwise, ERC20 tokens.
+    function withdrawAlternative(address token, address to, uint amount, bool unwrapETH) external override lock {
+        if (token == NATIVE_ETH) {
+            if (unwrapETH) {
+                // Send native ETH to recipient.
+                TransferHelper.safeTransferETH(to, amount);
+            } else {
+                // Wrap native ETH to wETH.
+                IWETH(wETH).deposit{value: amount}();
+
+                // Send wETH to recipient.
+                IWETH(wETH).transfer(to, amount);
+            }
+        } else {
+            if (token == wETH) {
+                // Ensure the same `reserves` and `balances` as native ETH.
+                token = NATIVE_ETH;
+
+                if (unwrapETH) {
+                    // Send native ETH to recipient.
+                    TransferHelper.safeTransferETH(to, amount);
+                } else {
+                    // Wrap native ETH to wETH.
+                    IWETH(wETH).deposit{value: amount}();
+
+                    // Send wETH to recipient.
+                    IWETH(wETH).transfer(to, amount);
+                }
+            } else {
+                // Send ERC20 tokens to recipient.
+                TransferHelper.safeTransfer(token, to, amount);
+            }
+        }
+
+        // Decrease token balance for sender.
+        balances[token][msg.sender] -= amount;
+
+        // Decrease token reserve.
+        unchecked {
+            /// `reserves` cannot underflow if `balances` doesn't underflow.
+            reserves[token] -= amount;
+        }
+    }
+
+    function withdrawETH(address to, uint amount) external override lock {
+        // Send native ETH to recipient.
+        TransferHelper.safeTransferETH(to, amount);
+
+        // Decrease token balance for sender.
+        balances[NATIVE_ETH][msg.sender] -= amount;
+
+        // Decrease token reserve.
+        unchecked {
+            /// `reserves` cannot underflow if `balances` doesn't underflow.
+            reserves[NATIVE_ETH] -= amount;
         }
     }
 }
