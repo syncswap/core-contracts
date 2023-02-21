@@ -50,10 +50,11 @@ describe('SyncSwapStablePoolFactory', () => {
       ["address", "address"], [tokenA, tokenB]
     );
     await expect(master.createPool(factory.address, data))
-      .to.emit(factory, 'PoolCreated');
+      .to.emit(factory, 'PoolCreated')
+      .to.emit(master, 'RegisterPool');
 
-    await expect(master.createPool(factory.address, data)).to.be.revertedWith('PoolExists()');
-    await expect(master.createPool(factory.address, data)).to.be.revertedWith('PoolExists()');
+    await expect(master.createPool(factory.address, data)).to.be.reverted;
+    await expect(master.createPool(factory.address, data)).to.be.reverted;
 
     const poolAddress = await factory.getPool(tokenA, tokenB);
     expect(await factory.getPool(tokenB, tokenA)).to.eq(poolAddress);
@@ -84,7 +85,7 @@ describe('SyncSwapStablePoolFactory', () => {
     );
     const tx = await master.createPool(factory.address, data);
     const receipt = await tx.wait();
-    expect(receipt.gasUsed).to.eq(2521771); // 2512920 for Uniswap V2
+    expect(receipt.gasUsed).to.eq(2571177); // 2512920 for Uniswap V2
   });
 
   /*

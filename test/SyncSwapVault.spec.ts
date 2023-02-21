@@ -1,7 +1,7 @@
 import chai, { expect } from 'chai';
-import { Contract } from 'ethers';
+import { BigNumber, Contract } from 'ethers';
 import { solidity } from 'ethereum-waffle';
-import { expandTo18Decimals, ZERO_ADDRESS } from './shared/utilities';
+import { expandTo18Decimals, ZERO, ZERO_ADDRESS } from './shared/utilities';
 import { deploySyncSwapLPToken, deployVault, deployWETH9 } from './shared/fixtures';
 import { SignerWithAddress } from '@nomiclabs/hardhat-ethers/signers';
 import { HardhatEthersHelpers } from '@nomiclabs/hardhat-ethers/types';
@@ -42,18 +42,18 @@ describe('SyncSwapVault', () => {
   });
 
   it('Should receive and deposit some ERC20 tokens', async () => {
-    expect(vault.receiveAndDeposit(token.address, wallet.address, TEST_AMOUNT))
+    expect(vault.transferAndDeposit(token.address, wallet.address, TEST_AMOUNT))
       .to.be.revertedWith('SafeTransferFromFailed()');
 
     const balanceBefore = await token.balanceOf(wallet.address);
 
     await token.approve(vault.address, TEST_AMOUNT);
-    await vault.receiveAndDeposit(token.address, wallet.address, TEST_AMOUNT);
+    await vault.transferAndDeposit(token.address, wallet.address, TEST_AMOUNT);
 
     expect(await vault.balanceOf(token.address, wallet.address)).to.eq(TEST_AMOUNT);
     expect(await token.balanceOf(wallet.address)).to.eq(balanceBefore.sub(TEST_AMOUNT));
 
-    expect(vault.receiveAndDeposit(token.address, wallet.address, '1'))
+    expect(vault.transferAndDeposit(token.address, wallet.address, '1'))
       .to.be.revertedWith('SafeTransferFromFailed()');
   });
 
@@ -96,7 +96,7 @@ describe('SyncSwapVault', () => {
     });
 
     await weth.approve(vault.address, TEST_AMOUNT);
-    await vault.receiveAndDeposit(weth.address, wallet.address, TEST_AMOUNT);
+    await vault.transferAndDeposit(weth.address, wallet.address, TEST_AMOUNT);
 
     expect(await vault.balanceOf(NATIVE_ETH, wallet.address)).to.eq(TEST_AMOUNT);
     expect(await vault.balanceOf(weth.address, wallet.address)).to.eq(TEST_AMOUNT);
@@ -204,6 +204,11 @@ describe('SyncSwapVault', () => {
     expect(await token.balanceOf(other.address)).to.eq(10000);
   });
 
+  async function getGasFees(response: any): Promise<BigNumber> {
+    const receipt = await response.wait();
+    return receipt.gasUsed.mul(receipt.effectiveGasPrice);
+  }
+
   it('Should withdraw some ETH', async () => {
     // Deposit ETH.
     await vault.deposit(NATIVE_ETH, wallet.address, {
@@ -212,22 +217,23 @@ describe('SyncSwapVault', () => {
 
     const balanceBefore = await wallet.getBalance();
 
-    await vault.withdraw(NATIVE_ETH, wallet.address, TEST_AMOUNT);
+    let fees = ZERO;
+    fees = fees.add(await getGasFees(await vault.withdraw(NATIVE_ETH, wallet.address, TEST_AMOUNT)));
     expect(await vault.balanceOf(weth.address, wallet.address)).to.eq(0);
     expect(await vault.balanceOf(NATIVE_ETH, wallet.address)).to.eq(0);
-    expect(await wallet.getBalance()).to.eq(balanceBefore.add(TEST_AMOUNT));
+    expect(await wallet.getBalance()).to.eq(balanceBefore.add(TEST_AMOUNT).sub(fees));
 
     // Deposit wETH.
-    await weth.deposit({
+    fees = fees.add(await getGasFees(await weth.deposit({
       value: 20000,
-    });
-    await weth.transfer(vault.address, 20000);
-    await vault.deposit(weth.address, wallet.address);
+    })));
+    fees = fees.add(await getGasFees(await weth.transfer(vault.address, 20000)));
+    fees = fees.add(await getGasFees(await vault.deposit(weth.address, wallet.address)));
 
-    await vault.withdraw(NATIVE_ETH, wallet.address, 10000);
+    fees = fees.add(await getGasFees(await vault.withdraw(NATIVE_ETH, wallet.address, 10000)));
     expect(await vault.balanceOf(weth.address, wallet.address)).to.eq(10000);
     expect(await vault.balanceOf(NATIVE_ETH, wallet.address)).to.eq(10000);
-    expect(await wallet.getBalance()).to.eq(balanceBefore.add(TEST_AMOUNT).sub(10000));
+    expect(await wallet.getBalance()).to.eq(balanceBefore.add(TEST_AMOUNT).sub(10000).sub(fees));
   });
 
   it('Should withdraw some wETH', async () => {

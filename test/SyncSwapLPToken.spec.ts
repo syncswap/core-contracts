@@ -28,8 +28,8 @@ describe('SyncSwapLPToken', () => {
   })
 
   it('Should return expected token metadata', async () => {
-    expect(await token.name()).to.eq('SyncSwap LP Token');
-    expect(await token.symbol()).to.eq('SSLP');
+    expect(await token.name()).to.eq('');
+    expect(await token.symbol()).to.eq('');
     expect(await token.decimals()).to.eq(18);
     expect(await token.totalSupply()).to.eq(TOTAL_SUPPLY);
     expect(await token.balanceOf(wallet.address)).to.eq(TOTAL_SUPPLY);

@@ -10,7 +10,7 @@ module.exports = {
     version: "latest",
     compilerSource: "binary",
     settings: {
-      compilerPath: "./zksolc-linux-amd64-musl-v1.2.0",
+      compilerPath: "./zksolc-linux-amd64-musl-v1.3.1",
     },
   },
 
@@ -51,14 +51,18 @@ module.exports = {
     hardhat: {
       chainId: 280,
       gasMultiplier: 0,
-      gasPrice: 0,
-      initialBaseFeePerGas: 0
+      initialBaseFeePerGas: 0,
+    },
+
+    goerli: {
+      url: "https://rpc.ankr.com/eth_goerli"
     },
 
     // Run compile task with this network to generate `artifacts-zk` and `cache-zk`.
     // Example: `yarn hardhat compile --network zksync`
-    zksyncTestnet: {
+    zkTestnet: {
       zksync: true,
+      ethNetwork: "goerli",
       url: 'https://zksync2-testnet.zksync.dev',
       chainId: 280
     },

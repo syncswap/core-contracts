@@ -4,6 +4,7 @@ pragma solidity ^0.8.0;
 
 import "../../libraries/Lock.sol";
 import "../../libraries/Math.sol";
+import "../../libraries/MetadataHelper.sol";
 
 import "../../interfaces/IVault.sol";
 import "../../interfaces/IPoolMaster.sol";
@@ -21,7 +22,7 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
     uint private constant MAX_FEE = 1e5; /// @dev 100%.
 
     /// @dev Pool type `1` for classic pools.
-    uint16 public constant poolType = 1;
+    uint16 public constant override poolType = 1;
 
     address public immutable override master;
     address public immutable override vault;
@@ -42,10 +43,27 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
     /// @dev Factory must ensures that the parameters are valid.
     constructor() {
         (bytes memory _deployData) = IPoolFactory(msg.sender).getDeployData();
-        (address _master, address _token0, address _token1) = abi.decode(_deployData, (address, address, address));
+        (address _token0, address _token1) = abi.decode(_deployData, (address, address));
+        address _master = IPoolFactory(msg.sender).master();
 
+        master = _master;
         vault = IPoolMaster(_master).vault();
-        (master, token0, token1) = (_master, _token0, _token1);
+        (token0, token1) = (_token0, _token1);
+
+        // try to set symbols for the LP token
+        (bool _success0, string memory _symbol0) = MetadataHelper.getSymbol(_token0);
+        (bool _success1, string memory _symbol1) = MetadataHelper.getSymbol(_token1);
+        if (_success0 && _success1) {
+            _initializeMetadata(
+                string(abi.encodePacked("SyncSwap ", _symbol0, "/", _symbol1, " Classic LP")),
+                string(abi.encodePacked(_symbol0, "/", _symbol1, " cSLP"))
+            );
+        } else {
+            _initializeMetadata(
+                "SyncSwap Classic LP",
+                "cSLP"
+            );
+        }
     }
 
     function getAssets() external view override returns (address[] memory assets) {
@@ -155,7 +173,7 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
         uint _amount0 = _liquidity * _balance0 / _totalSupply;
         uint _amount1 = _liquidity * _balance1 / _totalSupply;
 
-        // Burns liquidity and, update last invariant using counterfactuals balances.
+        // Burns liquidity.
         _burn(address(this), _liquidity);
 
         // Swap one token for another, transfers desired tokens, and update context values.
@@ -229,6 +247,14 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
         _updateReserves(_balance0, _balance1);
     }
 
+    function getSwapFee() public view override returns (uint24 _swapFee) {
+        _swapFee = IPoolMaster(master).getSwapFee(address(this));
+    }
+
+    function getProtocolFee() public view override returns (uint24 _protocolFee) {
+        _protocolFee = IPoolMaster(master).protocolFee(poolType);
+    }
+
     function _updateReserves(uint _balance0, uint _balance1) private {
         (reserve0, reserve1) = (_balance0, _balance1);
         emit Sync(_balance0, _balance1);
@@ -238,17 +264,13 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
         if (withdrawMode == 0) {
             IVault(vault).transfer(token, to, amount);
         } else {
-            IVault(vault).withdrawAlternative(token, to, amount, withdrawMode == 1);
+            IVault(vault).withdrawAlternative(token, to, amount, withdrawMode);
         }
     }
 
     function _balances() private view returns (uint balance0, uint balance1) {
         balance0 = IVault(vault).balanceOf(token0, address(this));
         balance1 = IVault(vault).balanceOf(token1, address(this));
-    }
-
-    function _getSwapFee() private view returns (uint24 _swapFee) {
-        _swapFee = IPoolMaster(master).getSwapFee(address(this));
     }
 
     /// @dev This fee is charged to cover for the swap fee when users add unbalanced liquidity.
@@ -263,10 +285,10 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
         }
         uint _amount1Optimal = (_amount0 * _reserve1) / _reserve0;
         if (_amount1 >= _amount1Optimal) {
-            _token1Fee = (_getSwapFee() * (_amount1 - _amount1Optimal)) / (2 * MAX_FEE);
+            _token1Fee = (getSwapFee() * (_amount1 - _amount1Optimal)) / (2 * MAX_FEE);
         } else {
             uint _amount0Optimal = (_amount1 * _reserve0) / _reserve1;
-            _token0Fee = (_getSwapFee() * (_amount0 - _amount0Optimal)) / (2 * MAX_FEE);
+            _token0Fee = (getSwapFee() * (_amount0 - _amount0Optimal)) / (2 * MAX_FEE);
         }
     }
 
@@ -282,7 +304,7 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
             if (_feeOn) {
                 if (_invariant > _invariantLast) {
                     /// @dev Mints `protocolFee` % of growth in liquidity (invariant).
-                    uint _protocolFee = IPoolMaster(master).protocolFee(poolType);
+                    uint _protocolFee = getProtocolFee();
                     uint _numerator = _totalSupply * (_invariant - _invariantLast) * _protocolFee;
                     uint _denominator = (MAX_FEE - _protocolFee) * _invariant + _protocolFee * _invariantLast;
                     uint _liquidity = _numerator / _denominator;
@@ -322,7 +344,7 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
         if (_amountIn == 0) {
             _dy = 0;
         } else {
-            uint _amountInWithFee = _amountIn * (MAX_FEE - _getSwapFee());
+            uint _amountInWithFee = _amountIn * (MAX_FEE - getSwapFee());
             if (_token0In) {
                 _dy = (_amountInWithFee * _reserve1) / (_reserve0 * MAX_FEE + _amountInWithFee);
             } else {
@@ -341,9 +363,9 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
             _dx = 0;
         } else {
             if (_token0Out) {
-                _dx = (_reserve1 * _amountOut * MAX_FEE) / ((_reserve0 - _amountOut) * (MAX_FEE - _getSwapFee())) + 1;
+                _dx = (_reserve1 * _amountOut * MAX_FEE) / ((_reserve0 - _amountOut) * (MAX_FEE - getSwapFee())) + 1;
             } else {
-                _dx = (_reserve0 * _amountOut * MAX_FEE) / ((_reserve1 - _amountOut) * (MAX_FEE - _getSwapFee())) + 1;
+                _dx = (_reserve0 * _amountOut * MAX_FEE) / ((_reserve1 - _amountOut) * (MAX_FEE - getSwapFee())) + 1;
             }
         }
     }

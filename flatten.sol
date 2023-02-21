@@ -1,5 +1,3 @@
-// Sources flattened with hardhat v2.9.1 https://hardhat.org
-
 // File contracts/interfaces/token/IERC20Base.sol
 
 // SPDX-License-Identifier: AGPL-3.0-or-later
@@ -150,19 +148,35 @@ interface IPool {
         uint amount;
     }
 
-    function poolType() external view returns (uint16);
+    /// @dev Returns the address of pool master.
     function master() external view returns (address);
+
+    /// @dev Returns the vault.
     function vault() external view returns (address);
 
+    /// @dev Returns the pool type.
+    function poolType() external view returns (uint16);
+
+    /// @dev Returns the assets of the pool.
     function getAssets() external view returns (address[] memory assets);
 
+    /// @dev Returns the swap fee of the pool.
+    function getSwapFee() external view returns (uint24 swapFee);
+
+    /// @dev Returns the protocol fee of the pool.
+    function getProtocolFee() external view returns (uint24 protocolFee);
+
+    /// @dev Mints liquidity.
     function mint(bytes calldata data) external returns (uint liquidity);
 
+    /// @dev Burns liquidity.
     function burn(bytes calldata data) external returns (TokenAmount[] memory amounts);
+
+    /// @dev Burns liquidity with single output token.
     function burnSingle(bytes calldata data) external returns (uint amountOut);
 
+    /// @dev Swaps between tokens.
     function swap(bytes calldata data) external returns (uint amountOut);
-    //function flashSwap(bytes calldata data) external returns (uint amountIn0, uint amountIn1);
 }
 
 
@@ -377,8 +391,22 @@ library SignatureChecker {
 
 pragma solidity ^0.8.0;
 
- /// @dev Modified from Solmate (https://github.com/Rari-Capital/solmate/blob/main/src/utils/FixedPointMathLib.sol)
+/// @dev Math functions.
+/// @dev Modified from Solmate (https://github.com/Rari-Capital/solmate/blob/main/src/utils/FixedPointMathLib.sol)
 library Math {
+
+    /// @notice Compares a and b and returns 'true' if the difference between a and b
+    /// is less than 1 or equal to each other.
+    /// @param a uint256 to compare with.
+    /// @param b uint256 to compare with.
+    function within1(uint256 a, uint256 b) internal pure returns (bool) {
+        unchecked {
+            if (a > b) {
+                return a - b <= 1;
+            }
+            return b - a <= 1;
+        }
+    }
 
     function sqrt(uint256 x) internal pure returns (uint256 z) {
         assembly {
@@ -443,6 +471,8 @@ library Math {
             z := sub(z, lt(div(x, z), z))
         }
     }
+
+    // Mul Div
 
     /// @dev Rounded down.
     function mulDiv(
@@ -527,20 +557,10 @@ library Math {
         }
     }
 
-    /// @notice Compares a and b and returns 'true' if the difference between a and b
-    /// is less than 1 or equal to each other.
-    /// @param a uint256 to compare with.
-    /// @param b uint256 to compare with.
-    function within1(uint256 a, uint256 b) internal pure returns (bool) {
-        unchecked {
-            if (a > b) {
-                return a - b <= 1;
-            }
-            return b - a <= 1;
-        }
-    }
+    // Mul
 
     /// @dev Optimized safe multiplication operation for minimal gas cost.
+    /// Equivalent to *
     function mul(
         uint256 x,
         uint256 y
@@ -573,7 +593,10 @@ library Math {
         }
     }
 
+    // Div
+
     /// @dev Optimized safe division operation for minimal gas cost.
+    /// Equivalent to /
     function div(
         uint256 x,
         uint256 y
@@ -589,8 +612,8 @@ library Math {
         }
     }
 
-    /// @dev Optimized unsafe division operation for minimal gas cost
-    /// - division by 0 will not reverts and returns 0, and must be checked externally.
+    /// @dev Optimized unsafe division operation for minimal gas cost.
+    /// Division by 0 will not reverts and returns 0, and must be checked externally.
     function divUnsafeLast(
         uint256 x,
         uint256 y
@@ -684,27 +707,51 @@ library StableMath {
 
 pragma solidity >=0.5.0;
 
+/// @dev The master contract to control fees, create pools and manage whitelisted factories.
+/// Management functions are omitted.
 interface IPoolMaster {
+    // Events
     event SetDefaultSwapFee(uint16 indexed poolType, uint24 defaultSwapFee);
+
     event SetCustomSwapFee(address indexed pool, uint24 customSwapFee);
+
     event SetProtocolFee(uint16 indexed poolType, uint24 protocolFee);
+
     event SetFeeRecipient(address indexed previousFeeRecipient, address indexed newFeeRecipient);
+
     event SetFactoryWhitelisted(address indexed factory, bool whitelisted);
-    event CreatePool(address indexed factory, address indexed pool, bytes data);
+
+    event RegisterPool(
+        address indexed factory,
+        address indexed pool,
+        uint16 indexed poolType,
+        bytes data
+    );
 
     function vault() external view returns (address);
 
+    // Fees
     function defaultSwapFee(uint16 poolType) external view returns (uint24);
+
     function customSwapFee(address pool) external view returns (uint24);
+
     function feeRecipient() external view returns (address);
+
     function protocolFee(uint16 poolType) external view returns (uint24);
-
-    function isPool(address) external view returns (bool);
-    function isFactoryWhitelisted(address) external view returns (bool);
-
+    
     function getSwapFee(address pool) external view returns (uint24 swapFee);
 
+    // Factories
+    function isFactoryWhitelisted(address) external view returns (bool);
+
+    // Pools
+    function isPool(address) external view returns (bool);
+
+    function getPool(bytes32) external view returns (address);
+
     function createPool(address factory, bytes calldata data) external returns (address pool);
+
+    function registerPool(address pool, uint16 poolType, bytes calldata data) external;
 }
 
 
@@ -740,7 +787,7 @@ abstract contract Ownable {
 
     function acceptOwnership() external {
         address _pendingOwner = pendingOwner;
-        if (msg.sender != _pendingOwner) {
+        if (_pendingOwner != msg.sender) {
             revert NotPendingOwner();
         }
         _transferOwnership(_pendingOwner);
@@ -760,14 +807,14 @@ abstract contract Ownable {
 
 pragma solidity ^0.8.0;
 error NotPoolMaster();
-error IdenticalTokens();
-error PoolExists();
+error InvalidTokens();
 error InvalidFee();
 
 abstract contract BasePoolFactory is IBasePoolFactory, Ownable {
-    /// @dev The pool master.
+    /// @dev The pool master that control fees and registry.
     address public immutable master;
 
+    /// @dev Pools by its two pool tokens.
     mapping(address => mapping(address => address)) public override getPool;
 
     bytes internal cachedDeployData;
@@ -785,31 +832,63 @@ abstract contract BasePoolFactory is IBasePoolFactory, Ownable {
     }
 
     function createPool(bytes calldata data) external override returns (address pool) {
-        if (msg.sender != master) {
-            revert NotPoolMaster();
+        (address tokenA, address tokenB) = abi.decode(data, (address, address));
+
+        // Perform safety checks.
+        if (tokenA == tokenB) {
+            revert InvalidTokens();
         }
 
-        (address tokenA, address tokenB) = abi.decode(data, (address, address));
-        if (tokenA == tokenB) {
-            revert IdenticalTokens();
-        }
-        if (getPool[tokenA][tokenB] != address(0)) {
-            revert PoolExists();
-        }
+        // Sort tokens.
         if (tokenB < tokenA) {
             (tokenA, tokenB) = (tokenB, tokenA);
         }
+        if (tokenA == address(0)) {
+            revert InvalidTokens();
+        }
 
-        pool = _deployPool(tokenA, tokenB);
+        // Underlying implementation to deploy the pools and register them.
+        pool = _createPool(tokenA, tokenB);
 
+        // Populate mapping in both directions.
+        // Not necessary as existence of the master, but keep them for better compatibility.
         getPool[tokenA][tokenB] = pool;
-        getPool[tokenB][tokenA] = pool; // populate mapping in the reverse direction.
+        getPool[tokenB][tokenA] = pool;
 
         emit PoolCreated(tokenA, tokenB, pool);
     }
 
-    function _deployPool(address tokenA, address tokenB) internal virtual returns (address) {
+    function _createPool(address tokenA, address tokenB) internal virtual returns (address) {
     }
+}
+
+
+// File contracts/interfaces/IVault.sol
+
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+pragma solidity >=0.5.0;
+
+interface IVault {
+    function wETH() external view returns (address);
+
+    function reserves(address token) external view returns (uint reserve);
+
+    function balanceOf(address token, address owner) external view returns (uint balance);
+
+    function deposit(address token, address to) external payable returns (uint amount);
+
+    function depositETH(address to) external payable returns (uint amount);
+
+    function transferAndDeposit(address token, address to, uint amount) external payable;
+
+    function transfer(address token, address to, uint amount) external;
+
+    function withdraw(address token, address to, uint amount) external;
+
+    function withdrawAlternative(address token, address to, uint amount, uint8 mode) external;
+
+    function withdrawETH(address to, uint amount) external;
 }
 
 
@@ -833,29 +912,6 @@ abstract contract Lock {
         _;
         unlocked = 1;
     }
-}
-
-
-// File contracts/interfaces/IVault.sol
-
-// SPDX-License-Identifier: AGPL-3.0-or-later
-
-pragma solidity >=0.5.0;
-
-interface IVault {
-    function wETH() external view returns (address);
-
-    function reserves(address token) external view returns (uint reserve);
-
-    function balanceOf(address token, address owner) external view returns (uint balance);
-
-    function deposit(address token, address to) external payable returns (uint amount);
-
-    function receiveAndDeposit(address token, address to, uint amount) external payable;
-
-    function transfer(address token, address to, uint amount) external;
-
-    function withdraw(address token, address to, uint amount) external;
 }
 
 
@@ -904,12 +960,12 @@ contract SyncSwapLPToken is IERC20Permit2 {
         emit Approval(_owner, _spender, _amount);
     }
 
-    function approve(address _spender, uint _amount) external returns (bool) {
+    function approve(address _spender, uint _amount) public override returns (bool) {
         _approve(msg.sender, _spender, _amount);
         return true;
     }
 
-    function transfer(address _to, uint _amount) external override returns (bool) {
+    function transfer(address _to, uint _amount) public override returns (bool) {
         balanceOf[msg.sender] -= _amount;
 
         // Cannot overflow because the sum of all user balances can't exceed the max uint256 value.
@@ -921,7 +977,7 @@ contract SyncSwapLPToken is IERC20Permit2 {
         return true;
     }
 
-    function transferFrom(address _from, address _to, uint _amount) external override returns (bool) {
+    function transferFrom(address _from, address _to, uint _amount) public override returns (bool) {
         uint256 _allowed = allowance[_from][msg.sender]; // Saves gas for limited approvals.
         if (_allowed != type(uint).max) {
             allowance[_from][msg.sender] = _allowed - _amount;
@@ -990,7 +1046,7 @@ contract SyncSwapLPToken is IERC20Permit2 {
         uint8 _v,
         bytes32 _r,
         bytes32 _s
-    ) external override ensures(_deadline) {
+    ) public override ensures(_deadline) {
         bytes32 _hash = _permitHash(_owner, _spender, _amount, _deadline);
         address _recoveredAddress = ecrecover(_hash, _v, _r, _s);
 
@@ -1007,7 +1063,7 @@ contract SyncSwapLPToken is IERC20Permit2 {
         uint _amount,
         uint _deadline,
         bytes calldata _signature
-    ) external override ensures(_deadline) {
+    ) public override ensures(_deadline) {
         bytes32 _hash = _permitHash(_owner, _spender, _amount, _deadline);
 
         if (!SignatureChecker.isValidSignatureNow(_owner, _hash, _signature)) {
@@ -1033,7 +1089,7 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
     uint private constant MAX_FEE = 1e5; /// @dev 100%.
 
     /// @dev Pool type `1` for classic pools.
-    uint16 public constant poolType = 1;
+    uint16 public constant override poolType = 1;
 
     address public immutable override master;
     address public immutable override vault;
@@ -1054,10 +1110,12 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
     /// @dev Factory must ensures that the parameters are valid.
     constructor() {
         (bytes memory _deployData) = IPoolFactory(msg.sender).getDeployData();
-        (address _master, address _token0, address _token1) = abi.decode(_deployData, (address, address, address));
+        (address _token0, address _token1) = abi.decode(_deployData, (address, address));
+        address _master = IPoolFactory(msg.sender).master();
 
+        master = _master;
         vault = IPoolMaster(_master).vault();
-        (master, token0, token1) = (_master, _token0, _token1);
+        (token0, token1) = (_token0, _token1);
     }
 
     function getAssets() external view override returns (address[] memory assets) {
@@ -1115,7 +1173,7 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
     /// @dev Burns LP tokens sent to this contract.
     /// The router should ensure that sufficient pool tokens are received.
     function burn(bytes calldata _data) external override lock returns (TokenAmount[] memory _amounts) {
-        (address _to, bool _withdraw) = abi.decode(_data, (address, bool));
+        (address _to, uint8 _withdrawMode) = abi.decode(_data, (address, uint8));
         (uint _balance0, uint _balance1) = _balances();
         uint _liquidity = balanceOf[address(this)];
 
@@ -1129,8 +1187,8 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
 
         // Burns liquidity and transfers pool tokens.
         _burn(address(this), _liquidity);
-        _transferTokens(token0, _to, _amount0, _withdraw);
-        _transferTokens(token1, _to, _amount1, _withdraw);
+        _transferTokens(token0, _to, _amount0, _withdrawMode);
+        _transferTokens(token1, _to, _amount1, _withdrawMode);
 
         // Update reserves and last invariant with up-to-date balances (after transfers).
         /// @dev Using counterfactuals balances here to save gas.
@@ -1156,7 +1214,7 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
     /// - i.e., the user gets a single token out by burning LP tokens.
     /// The router should ensure that sufficient pool tokens are received.
     function burnSingle(bytes calldata _data) external override lock returns (uint _amountOut) {
-        (address _tokenOut, address _to, bool _withdraw) = abi.decode(_data, (address, address, bool));
+        (address _tokenOut, address _to, uint8 _withdrawMode) = abi.decode(_data, (address, address, uint8));
         (uint _balance0, uint _balance1) = _balances();
         uint _liquidity = balanceOf[address(this)];
 
@@ -1167,7 +1225,7 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
         uint _amount0 = _liquidity * _balance0 / _totalSupply;
         uint _amount1 = _liquidity * _balance1 / _totalSupply;
 
-        // Burns liquidity and, update last invariant using counterfactuals balances.
+        // Burns liquidity.
         _burn(address(this), _liquidity);
 
         // Swap one token for another, transfers desired tokens, and update context values.
@@ -1175,7 +1233,7 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
         if (_tokenOut == token1) {
             // Swap `token0` for `token1`.
             _amount1 += _getAmountOut(_amount0, _balance0 - _amount0, _balance1 - _amount1, true);
-            _transferTokens(token1, _to, _amount1, _withdraw);
+            _transferTokens(token1, _to, _amount1, _withdrawMode);
             _amountOut = _amount1;
             _amount0 = 0;
             _balance1 -= _amount1;
@@ -1183,7 +1241,7 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
             // Swap `token1` for `token0`.
             require(_tokenOut == token0); // ensures to prevent from messing up the pool with bad parameters.
             _amount0 += _getAmountOut(_amount1, _balance0 - _amount0, _balance1 - _amount1, false);
-            _transferTokens(token0, _to, _amount0, _withdraw);
+            _transferTokens(token0, _to, _amount0, _withdrawMode);
             _amountOut = _amount0;
             _amount1 = 0;
             _balance0 -= _amount0;
@@ -1203,7 +1261,7 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
     /// @dev Swaps one token for another - should be called via the router after transferring input tokens.
     /// The router should ensure that sufficient output tokens are received.
     function swap(bytes calldata _data) external override lock returns (uint _amountOut) {
-        (address _tokenIn, address _to, bool _withdraw) = abi.decode(_data, (address, address, bool));
+        (address _tokenIn, address _to, uint8 _withdrawMode) = abi.decode(_data, (address, address, uint8));
         (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
         (uint _balance0, uint _balance1) = _balances();
 
@@ -1234,11 +1292,19 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
         }
 
         // Transfers output tokens.
-        _transferTokens(_tokenOut, _to, _amountOut, _withdraw);
+        _transferTokens(_tokenOut, _to, _amountOut, _withdrawMode);
 
         // Update reserves with up-to-date balances (updated above).
         /// @dev Using counterfactuals balances here to save gas.
         _updateReserves(_balance0, _balance1);
+    }
+
+    function getSwapFee() public view override returns (uint24 _swapFee) {
+        _swapFee = IPoolMaster(master).getSwapFee(address(this));
+    }
+
+    function getProtocolFee() public view override returns (uint24 _protocolFee) {
+        _protocolFee = IPoolMaster(master).protocolFee(poolType);
     }
 
     function _updateReserves(uint _balance0, uint _balance1) private {
@@ -1246,21 +1312,17 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
         emit Sync(_balance0, _balance1);
     }
 
-    function _transferTokens(address token, address to, uint amount, bool withdraw) private {
-        if (withdraw) {
-            IVault(vault).withdraw(token, to, amount);
-        } else {
+    function _transferTokens(address token, address to, uint amount, uint8 withdrawMode) private {
+        if (withdrawMode == 0) {
             IVault(vault).transfer(token, to, amount);
+        } else {
+            IVault(vault).withdrawAlternative(token, to, amount, withdrawMode);
         }
     }
 
     function _balances() private view returns (uint balance0, uint balance1) {
         balance0 = IVault(vault).balanceOf(token0, address(this));
         balance1 = IVault(vault).balanceOf(token1, address(this));
-    }
-
-    function _getSwapFee() private view returns (uint24 _swapFee) {
-        _swapFee = IPoolMaster(master).getSwapFee(address(this));
     }
 
     /// @dev This fee is charged to cover for the swap fee when users add unbalanced liquidity.
@@ -1275,10 +1337,10 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
         }
         uint _amount1Optimal = (_amount0 * _reserve1) / _reserve0;
         if (_amount1 >= _amount1Optimal) {
-            _token1Fee = (_getSwapFee() * (_amount1 - _amount1Optimal)) / (2 * MAX_FEE);
+            _token1Fee = (getSwapFee() * (_amount1 - _amount1Optimal)) / (2 * MAX_FEE);
         } else {
             uint _amount0Optimal = (_amount1 * _reserve0) / _reserve1;
-            _token0Fee = (_getSwapFee() * (_amount0 - _amount0Optimal)) / (2 * MAX_FEE);
+            _token0Fee = (getSwapFee() * (_amount0 - _amount0Optimal)) / (2 * MAX_FEE);
         }
     }
 
@@ -1294,7 +1356,7 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
             if (_feeOn) {
                 if (_invariant > _invariantLast) {
                     /// @dev Mints `protocolFee` % of growth in liquidity (invariant).
-                    uint _protocolFee = IPoolMaster(master).protocolFee(poolType);
+                    uint _protocolFee = getProtocolFee();
                     uint _numerator = _totalSupply * (_invariant - _invariantLast) * _protocolFee;
                     uint _denominator = (MAX_FEE - _protocolFee) * _invariant + _protocolFee * _invariantLast;
                     uint _liquidity = _numerator / _denominator;
@@ -1334,7 +1396,7 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
         if (_amountIn == 0) {
             _dy = 0;
         } else {
-            uint _amountInWithFee = _amountIn * (MAX_FEE - _getSwapFee());
+            uint _amountInWithFee = _amountIn * (MAX_FEE - getSwapFee());
             if (_token0In) {
                 _dy = (_amountInWithFee * _reserve1) / (_reserve0 * MAX_FEE + _amountInWithFee);
             } else {
@@ -1353,9 +1415,9 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
             _dx = 0;
         } else {
             if (_token0Out) {
-                _dx = (_reserve1 * _amountOut * MAX_FEE) / ((_reserve0 - _amountOut) * (MAX_FEE - _getSwapFee())) + 1;
+                _dx = (_reserve1 * _amountOut * MAX_FEE) / ((_reserve0 - _amountOut) * (MAX_FEE - getSwapFee())) + 1;
             } else {
-                _dx = (_reserve0 * _amountOut * MAX_FEE) / ((_reserve1 - _amountOut) * (MAX_FEE - _getSwapFee())) + 1;
+                _dx = (_reserve0 * _amountOut * MAX_FEE) / ((_reserve1 - _amountOut) * (MAX_FEE - getSwapFee())) + 1;
             }
         }
     }
@@ -1375,16 +1437,20 @@ contract SyncSwapClassicPoolFactory is BasePoolFactory {
     constructor(address _master) BasePoolFactory(_master) {
     }
 
-    function _deployPool(address token0, address token1) internal override returns (address pool) {
-        // Perform sanity check for tokens.
+    function _createPool(address token0, address token1) internal override returns (address pool) {
+        // Perform sanity checks.
         IERC20(token0).balanceOf(address(this));
         IERC20(token1).balanceOf(address(this));
 
-        bytes memory deployData = abi.encode(master, token0, token1);
+        bytes memory deployData = abi.encode(token0, token1);
         cachedDeployData = deployData;
 
+        // The salt is same with deployment data.
         bytes32 salt = keccak256(deployData);
-        pool = address(new SyncSwapClassicPool{salt: salt}());
+        pool = address(new SyncSwapClassicPool{salt: salt}()); // this will prevent duplicated pools.
+
+        // Register the pool. The config is same with deployment data.
+        IPoolMaster(master).registerPool(pool, 1, deployData);
     }
 }
 
@@ -1432,13 +1498,15 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
     /// @dev Factory must ensures that the parameters are valid.
     constructor() {
         (bytes memory _deployData) = IPoolFactory(msg.sender).getDeployData();
-        (address _master, address _token0, address _token1, uint _token0PrecisionMultiplier, uint _token1PrecisionMultiplier) = abi.decode(
-            _deployData, (address, address, address, uint, uint)
+        (address _token0, address _token1, uint _token0PrecisionMultiplier, uint _token1PrecisionMultiplier) = abi.decode(
+            _deployData, (address, address, uint, uint)
         );
+        address _master = IPoolFactory(msg.sender).master();
 
+        master = _master;
         vault = IPoolMaster(_master).vault();
-        (master, token0, token1, token0PrecisionMultiplier, token1PrecisionMultiplier) = (
-            _master, _token0, _token1, _token0PrecisionMultiplier, _token1PrecisionMultiplier
+        (token0, token1, token0PrecisionMultiplier, token1PrecisionMultiplier) = (
+            _token0, _token1, _token0PrecisionMultiplier, _token1PrecisionMultiplier
         );
     }
 
@@ -1497,7 +1565,7 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
     /// @dev Burns LP tokens sent to this contract.
     /// The router should ensure that sufficient pool tokens are received.
     function burn(bytes calldata _data) external override lock returns (TokenAmount[] memory _amounts) {
-        (address _to, bool _withdraw) = abi.decode(_data, (address, bool));
+        (address _to, uint8 _withdrawMode) = abi.decode(_data, (address, uint8));
         (uint _balance0, uint _balance1) = _balances();
         uint _liquidity = balanceOf[address(this)];
 
@@ -1511,8 +1579,8 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
 
         // Burns liquidity and transfers pool tokens.
         _burn(address(this), _liquidity);
-        _transferTokens(token0, _to, _amount0, _withdraw);
-        _transferTokens(token1, _to, _amount1, _withdraw);
+        _transferTokens(token0, _to, _amount0, _withdrawMode);
+        _transferTokens(token1, _to, _amount1, _withdrawMode);
 
         // Update reserves and last invariant with up-to-date balances (after transfers).
         /// @dev Using counterfactuals balances here to save gas.
@@ -1538,7 +1606,7 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
     /// - i.e., the user gets a single token out by burning LP tokens.
     /// The router should ensure that sufficient pool tokens are received.
     function burnSingle(bytes calldata _data) external override lock returns (uint _amountOut) {
-        (address _tokenOut, address _to, bool _withdraw) = abi.decode(_data, (address, address, bool));
+        (address _tokenOut, address _to, uint8 _withdrawMode) = abi.decode(_data, (address, address, uint8));
         (uint _balance0, uint _balance1) = _balances();
         uint _liquidity = balanceOf[address(this)];
 
@@ -1557,7 +1625,7 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
         if (_tokenOut == token1) {
             // Swap `token0` for `token1`.
             _amount1 += _getAmountOut(_amount0, _balance0 - _amount0, _balance1 - _amount1, true);
-            _transferTokens(token1, _to, _amount1, _withdraw);
+            _transferTokens(token1, _to, _amount1, _withdrawMode);
             _amountOut = _amount1;
             _amount0 = 0;
             _balance1 -= _amount1;
@@ -1565,7 +1633,7 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
             // Swap `token1` for `token0`.
             require(_tokenOut == token0); // ensures to prevent from messing up the pool with bad parameters.
             _amount0 += _getAmountOut(_amount1, _balance0 - _amount0, _balance1 - _amount1, false);
-            _transferTokens(token0, _to, _amount0, _withdraw);
+            _transferTokens(token0, _to, _amount0, _withdrawMode);
             _amountOut = _amount0;
             _amount1 = 0;
             _balance0 -= _amount0;
@@ -1585,7 +1653,7 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
     /// @dev Swaps one token for another - should be called via the router after transferring input tokens.
     /// The router should ensure that sufficient output tokens are received.
     function swap(bytes calldata _data) external override lock returns (uint _amountOut) {
-        (address _tokenIn, address _to, bool _withdraw) = abi.decode(_data, (address, address, bool));
+        (address _tokenIn, address _to, uint8 _withdrawMode) = abi.decode(_data, (address, address, uint8));
         (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
         (uint _balance0, uint _balance1) = _balances();
 
@@ -1601,9 +1669,9 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
             _amountOut = _getAmountOut(_amountIn, _reserve0, _reserve1, true);
             _balance1 -= _amountOut;
 
-            emit Swap(msg.sender, _amountIn, 0, 0, _amountOut, _to); // emit here to avoid checking direction 
+            emit Swap(msg.sender, _amountIn, 0, 0, _amountOut, _to);
         } else {
-            require(_tokenIn == token1); // ensures to prevent counterfeit event parameters.
+            //require(_tokenIn == token1);
             _tokenOut = token0;
             // Cannot underflow because reserve will never be larger than balance.
             unchecked {
@@ -1612,15 +1680,23 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
             _amountOut = _getAmountOut(_amountIn, _reserve0, _reserve1, false);
             _balance0 -= _amountOut;
 
-            emit Swap(msg.sender, 0, _amountIn, _amountOut, 0, _to); // emit here to avoid checking direction 
+            emit Swap(msg.sender, 0, _amountIn, _amountOut, 0, _to);
         }
 
         // Transfers output tokens.
-        _transferTokens(_tokenOut, _to, _amountOut, _withdraw);
+        _transferTokens(_tokenOut, _to, _amountOut, _withdrawMode);
 
         // Update reserves with up-to-date balances (updated above).
         /// @dev Using counterfactuals balances here to save gas.
         _updateReserves(_balance0, _balance1);
+    }
+
+    function getSwapFee() public view override returns (uint24 _swapFee) {
+        _swapFee = IPoolMaster(master).getSwapFee(address(this));
+    }
+
+    function getProtocolFee() public view override returns (uint24 _protocolFee) {
+        _protocolFee = IPoolMaster(master).protocolFee(poolType);
     }
 
     function _updateReserves(uint _balance0, uint _balance1) private {
@@ -1628,21 +1704,17 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
         emit Sync(_balance0, _balance1);
     }
 
-    function _transferTokens(address token, address to, uint amount, bool withdraw) private {
-        if (withdraw) {
-            IVault(vault).withdraw(token, to, amount);
-        } else {
+    function _transferTokens(address token, address to, uint amount, uint8 withdrawMode) private {
+        if (withdrawMode == 0) {
             IVault(vault).transfer(token, to, amount);
+        } else {
+            IVault(vault).withdrawAlternative(token, to, amount, withdrawMode);
         }
     }
 
     function _balances() private view returns (uint balance0, uint balance1) {
         balance0 = IVault(vault).balanceOf(token0, address(this));
         balance1 = IVault(vault).balanceOf(token1, address(this));
-    }
-
-    function _getSwapFee() private view returns (uint24 _swapFee) {
-        _swapFee = IPoolMaster(master).getSwapFee(address(this));
     }
 
     /// @dev This fee is charged to cover for the swap fee when users add unbalanced liquidity.
@@ -1657,10 +1729,10 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
         }
         uint _amount1Optimal = (_amount0 * _reserve1) / _reserve0;
         if (_amount1 >= _amount1Optimal) {
-            _token1Fee = (_getSwapFee() * (_amount1 - _amount1Optimal)) / (2 * MAX_FEE);
+            _token1Fee = (getSwapFee() * (_amount1 - _amount1Optimal)) / (2 * MAX_FEE);
         } else {
             uint _amount0Optimal = (_amount1 * _reserve0) / _reserve1;
-            _token0Fee = (_getSwapFee() * (_amount0 - _amount0Optimal)) / (2 * MAX_FEE);
+            _token0Fee = (getSwapFee() * (_amount0 - _amount0Optimal)) / (2 * MAX_FEE);
         }
     }
 
@@ -1676,7 +1748,7 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
             if (_feeOn) {
                 if (_invariant > _invariantLast) {
                     /// @dev Mints `protocolFee` % of growth in liquidity (invariant).
-                    uint _protocolFee = IPoolMaster(master).protocolFee(poolType);
+                    uint _protocolFee = getProtocolFee();
                     uint _numerator = _totalSupply * (_invariant - _invariantLast) * _protocolFee;
                     uint _denominator = (MAX_FEE - _protocolFee) * _invariant + _protocolFee * _invariantLast;
                     uint _liquidity = _numerator / _denominator;
@@ -1719,7 +1791,7 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
             unchecked {
                 uint _adjustedReserve0 = _reserve0 * token0PrecisionMultiplier;
                 uint _adjustedReserve1 = _reserve1 * token1PrecisionMultiplier;
-                uint _feeDeductedAmountIn = _amountIn - (_amountIn * _getSwapFee()) / MAX_FEE;
+                uint _feeDeductedAmountIn = _amountIn - (_amountIn * getSwapFee()) / MAX_FEE;
                 uint _d = StableMath.computeDFromAdjustedBalances(_adjustedReserve0, _adjustedReserve1);
 
                 if (_token0In) {
@@ -1752,20 +1824,20 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
                 uint _d = StableMath.computeDFromAdjustedBalances(_adjustedReserve0, _adjustedReserve1);
 
                 if (_token0Out) {
-                    uint _y = _adjustedReserve0 - _amountOut;
+                    uint _y = _adjustedReserve0 - (_amountOut * token0PrecisionMultiplier);
                     if (_y <= 1) {
                         return 1;
                     }
                     uint _x = StableMath.getY(_y, _d);
-                    _dx = MAX_FEE * (_x - _adjustedReserve1) / (MAX_FEE - _getSwapFee()) + 1;
+                    _dx = MAX_FEE * (_x - _adjustedReserve1) / (MAX_FEE - getSwapFee()) + 1;
                     _dx /= token1PrecisionMultiplier;
                 } else {
-                    uint _y = _adjustedReserve1 - _amountOut;
+                    uint _y = _adjustedReserve1 - (_amountOut * token1PrecisionMultiplier);
                     if (_y <= 1) {
                         return 1;
                     }
                     uint _x = StableMath.getY(_y, _d);
-                    _dx = MAX_FEE * (_x - _adjustedReserve0) / (MAX_FEE - _getSwapFee()) + 1;
+                    _dx = MAX_FEE * (_x - _adjustedReserve0) / (MAX_FEE - getSwapFee()) + 1;
                     _dx /= token0PrecisionMultiplier;
                 }
             }
@@ -1795,15 +1867,22 @@ contract SyncSwapStablePoolFactory is BasePoolFactory {
     constructor(address _master) BasePoolFactory(_master) {
     }
 
-    function _deployPool(address token0, address token1) internal override returns (address pool) {
+    function _createPool(address token0, address token1) internal override returns (address pool) {
+        // Tokens with decimals more than 18 are not supported and will lead to reverts.
         uint token0PrecisionMultiplier = 10 ** (18 - IERC20(token0).decimals());
         uint token1PrecisionMultiplier = 10 ** (18 - IERC20(token1).decimals());
 
-        bytes memory deployData = abi.encode(master, token0, token1, token0PrecisionMultiplier, token1PrecisionMultiplier);
+        bytes memory deployData = abi.encode(token0, token1, token0PrecisionMultiplier, token1PrecisionMultiplier);
         cachedDeployData = deployData;
 
+        // Remove precision multipliers from salt and config.
+        deployData = abi.encode(token0, token1);
+
         bytes32 salt = keccak256(deployData);
-        pool = address(new SyncSwapStablePool{salt: salt}());
+        pool = address(new SyncSwapStablePool{salt: salt}()); // this will prevent duplicated pools.
+
+        // Register the pool with config.
+        IPoolMaster(master).registerPool(pool, 2, deployData);
     }
 }
 
@@ -1815,19 +1894,31 @@ contract SyncSwapStablePoolFactory is BasePoolFactory {
 pragma solidity ^0.8.0;
 error NotWhitelistedFactory();
 error InvalidFee();
+error PoolAlreadyExists();
 
+/// @notice The pool master manages swap fees for pools, whitelist for factories,
+/// protocol fee and pool registry.
+///
+/// It accepts pool registers from whitelisted factories, with the pool data on pool
+/// creation, to enable querying of the existence or fees of a pool by address or config.
+///
+/// This contract provides a unified interface to query and manage fees across
+/// different pool types, and a unique registry for all pools.
+///
 contract SyncSwapPoolMaster is IPoolMaster, Ownable {
     uint24 private constant MAX_FEE = 1e5; /// @dev 100%.
     uint24 private constant MAX_SWAP_FEE = 10000; /// @dev 10%.
-    uint24 private constant ZERO_SWAP_FEE = type(uint24).max;
+    uint24 private constant ZERO_CUSTOM_SWAP_FEE = type(uint24).max;
 
     /// @dev The vault that holds funds.
     address public immutable override vault;
 
+    // Fees
+
     /// @dev The default swap fee by pool type.
     mapping(uint16 => uint24) public override defaultSwapFee; /// @dev `300` for 0.3%.
 
-    /// @dev The custom swap fee by pool address, use `ZERO_SWAP_FEE` for zero fee.
+    /// @dev The custom swap fee by pool address, use `ZERO_CUSTOM_SWAP_FEE` for zero fee.
     mapping(address => uint24) public override customSwapFee;
 
     /// @dev The recipient of protocol fees.
@@ -1836,24 +1927,34 @@ contract SyncSwapPoolMaster is IPoolMaster, Ownable {
     /// @dev The protocol fee of swap fee by pool type.
     mapping(uint16 => uint24) public override protocolFee; /// @dev `30000` for 30%.
 
-    /// @dev Whether an address is a pool.
-    mapping(address => bool) public override isPool;
+    // Factories
 
     /// @dev Whether an address is a factory.
     mapping(address => bool) public override isFactoryWhitelisted;
+
+    // Pools
+
+    /// @dev Whether an address is a pool.
+    mapping(address => bool) public override isPool;
+
+    /// @dev Pools by hash of its config.
+    mapping(bytes32 => address) public getPool;
 
     constructor(address _vault, address _feeRecipient) {
         vault = _vault;
         feeRecipient = _feeRecipient;
 
-        // classic pools.
+        // Prefill fees for known pool types.
+        // Classic pools.
         defaultSwapFee[1] = 300; // 0.3%.
         protocolFee[1] = 30000; // 30%.
 
-        // stable pools.
+        // Stable pools.
         defaultSwapFee[2] = 100; // 0.1%.
         protocolFee[2] = 50000; // 50%.
     }
+
+    // Fees
 
     function getSwapFee(address pool) external view override returns (uint24 swapFee) {
         uint24 _customSwapFee = customSwapFee[pool];
@@ -1861,7 +1962,7 @@ contract SyncSwapPoolMaster is IPoolMaster, Ownable {
         if (_customSwapFee == 0) {
             swapFee = defaultSwapFee[IPool(pool).poolType()]; // use default instead if not set.
         } else {
-            swapFee = (_customSwapFee == ZERO_SWAP_FEE ? 0 : _customSwapFee);
+            swapFee = (_customSwapFee == ZERO_CUSTOM_SWAP_FEE ? 0 : _customSwapFee);
         }
     }
 
@@ -1874,7 +1975,7 @@ contract SyncSwapPoolMaster is IPoolMaster, Ownable {
     }
 
     function setCustomSwapFee(address pool, uint24 _customSwapFee) external onlyOwner {
-        if (_customSwapFee > MAX_SWAP_FEE && _customSwapFee != ZERO_SWAP_FEE) {
+        if (_customSwapFee > MAX_SWAP_FEE && _customSwapFee != ZERO_CUSTOM_SWAP_FEE) {
             revert InvalidFee();
         }
         customSwapFee[pool] = _customSwapFee;
@@ -1890,39 +1991,90 @@ contract SyncSwapPoolMaster is IPoolMaster, Ownable {
     }
 
     function setFeeRecipient(address _feeRecipient) external onlyOwner {
+        // Emit here to avoid caching the previous recipient.
         emit SetFeeRecipient(feeRecipient, _feeRecipient);
         feeRecipient = _feeRecipient;
     }
+
+    // Factories
 
     function setFactoryWhitelisted(address factory, bool whitelisted) external onlyOwner {
         isFactoryWhitelisted[factory] = whitelisted;
         emit SetFactoryWhitelisted(factory, whitelisted);
     }
 
+    // Pools
+
+    /// @dev Create a pool with deployment data and, register it via the factory.
     function createPool(address factory, bytes calldata data) external override returns (address pool) {
-        if (!isFactoryWhitelisted[factory]) {
+        // The factory have to call `registerPool` to register the pool.
+        // The pool whitelist is checked in `registerPool`.
+        pool = IPoolFactory(factory).createPool(data);
+    }
+
+    /// @dev Register a pool to the mapping by its config. Can only be called by factories.
+    function registerPool(address pool, uint16 poolType, bytes calldata data) external override {
+        if (!isFactoryWhitelisted[msg.sender]) {
             revert NotWhitelistedFactory();
         }
 
-        pool = IPoolFactory(factory).createPool(data);
         require(pool != address(0));
 
+        // Double check to prevent duplicated pools.
+        if (isPool[pool]) {
+            revert PoolAlreadyExists();
+        }
+
+        // Encode and hash pool config to get the mapping key.
+        bytes32 hash = keccak256(abi.encode(poolType, data));
+
+        // Double check to prevent duplicated pools.
+        if (getPool[hash] != address(0)) {
+            revert PoolAlreadyExists();
+        }
+
+        // Set to mappings.
+        getPool[hash] = pool;
         isPool[pool] = true;
-        emit CreatePool(factory, pool, data);
+
+        emit RegisterPool(msg.sender, pool, poolType, data);
     }
 }
 
 
-// File contracts/interfaces/IWETH.sol
+// File contracts/abstract/Multicall.sol
 
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later
 
-pragma solidity >=0.5.0;
+pragma solidity >=0.8.0;
 
-interface IWETH {
-    function deposit() external payable;
-    function transfer(address to, uint value) external returns (bool);
-    function withdraw(uint) external;
+/// @notice Helper utility that enables calling multiple local methods in a single call.
+/// @author Modified from Uniswap (https://github.com/Uniswap/v3-periphery/blob/main/contracts/base/Multicall.sol)
+/// License-Identifier: GPL-2.0-or-later
+abstract contract Multicall {
+    function multicall(bytes[] calldata data) public payable returns (bytes[] memory results) {
+        results = new bytes[](data.length);
+        
+        for (uint256 i; i < data.length;) {
+            (bool success, bytes memory result) = address(this).delegatecall(data[i]);
+
+            if (!success) {
+                // Next 5 lines from https://ethereum.stackexchange.com/a/83577
+                if (result.length < 68) revert();
+                assembly {
+                    result := add(result, 0x04)
+                }
+                revert(abi.decode(result, (string)));
+            }
+
+            results[i] = result;
+
+            // cannot realistically overflow on human timescales
+            unchecked {
+                ++i;
+            }
+        }
+    }
 }
 
 
@@ -1958,6 +2110,31 @@ interface IRouter {
         uint deadline;
         bytes signature;
     }
+}
+
+
+// File contracts/interfaces/IStakingPool.sol
+
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+pragma solidity >=0.5.0;
+
+interface IStakingPool {
+    function stake(uint amount, address onBehalf) external;
+}
+
+
+// File contracts/interfaces/IWETH.sol
+
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+pragma solidity >=0.5.0;
+
+interface IWETH {
+    function deposit() external payable;
+    function transfer(address to, uint value) external returns (bool);
+    function transferFrom(address from, address to, uint value) external returns (bool);
+    function withdraw(uint) external;
 }
 
 
@@ -2028,42 +2205,6 @@ library TransferHelper {
 }
 
 
-// File contracts/abstract/Multicall.sol
-
-// SPDX-License-Identifier: GPL-3.0-or-later
-
-pragma solidity >=0.8.0;
-
-/// @notice Helper utility that enables calling multiple local methods in a single call.
-/// @author Modified from Uniswap (https://github.com/Uniswap/v3-periphery/blob/main/contracts/base/Multicall.sol)
-/// License-Identifier: GPL-2.0-or-later
-abstract contract Multicall {
-    function multicall(bytes[] calldata data) public payable returns (bytes[] memory results) {
-        results = new bytes[](data.length);
-        
-        for (uint256 i; i < data.length;) {
-            (bool success, bytes memory result) = address(this).delegatecall(data[i]);
-
-            if (!success) {
-                // Next 5 lines from https://ethereum.stackexchange.com/a/83577
-                if (result.length < 68) revert();
-                assembly {
-                    result := add(result, 0x04)
-                }
-                revert(abi.decode(result, (string)));
-            }
-
-            results[i] = result;
-
-            // cannot realistically overflow on human timescales
-            unchecked {
-                ++i;
-            }
-        }
-    }
-}
-
-
 // File contracts/SyncSwapRouter.sol
 
 // SPDX-License-Identifier: AGPL-3.0-or-later
@@ -2073,6 +2214,13 @@ error NotEnoughLiquidityMinted();
 error TooLittleReceived();
 error Expired();
 
+/// @notice The router is a universal interface for users to access
+/// functions across different protocol parts in one place.
+///
+/// It handles the allowances and transfers of tokens, and
+/// allows chained swaps/operations across multiple pools, with
+/// additional features like slippage protection and permit support.
+///
 contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
 
     struct TokenInput {
@@ -2106,12 +2254,8 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
     // Add Liquidity
     function _transferFromSender(address token, address to, uint amount) private {
         if (token == NATIVE_ETH) {
-            // Wrap native ETH to wETH.
-            //IWETH(wETH).deposit{value: msg.value}();
-
-            // Send wETH to recipient.
-            //require(IWETH(wETH).transfer(to, amount));
-            IVault(vault).deposit{value: msg.value}(token, to);
+            // Deposit ETH to the vault.
+            IVault(vault).deposit{value: amount}(token, to);
         } else {
             // Transfer tokens to the vault.
             TransferHelper.safeTransferFrom(token, msg.sender, vault, amount);
@@ -2263,7 +2407,7 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
         );
     }
 
-    // Remove Liquidity Single
+    // Burn Liquidity Single
     function _transferAndBurnLiquiditySingle(
         address pool,
         uint liquidity,
@@ -2293,7 +2437,7 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
         );
     }
 
-    function removeLiquiditySingleWithPermit(
+    function burnLiquiditySingleWithPermit(
         address pool,
         uint liquidity,
         bytes memory data,
@@ -2327,7 +2471,6 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
         SwapPath memory path;
         SwapStep memory step;
         uint stepsLength;
-        uint j;
 
         for (uint i; i < pathsLength; ) {
             path = paths[i];
@@ -2339,16 +2482,17 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
             // Cache steps length.
             stepsLength = path.steps.length;
 
-            for (j; j < stepsLength; ) {
-                if (j < stepsLength - 1) {
+            for (uint j; j < stepsLength; ) {
+                if (j == stepsLength - 1) {
+                    // Accumulate output amount at the last step.
+                    amountOut += IBasePool(step.pool).swap(step.data);
+                    break;
+                } else {
                     // Swap and send tokens to the next step.
                     IBasePool(step.pool).swap(step.data);
 
                     // Cache the next step.
                     step = path.steps[j + 1];
-                } else {
-                    // Accumulate output amount at the last step.
-                    amountOut += IBasePool(step.pool).swap(step.data);
                 }
 
                 unchecked {
@@ -2404,6 +2548,16 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
     function createPool(address _factory, bytes calldata data) external payable returns (address) {
         return IPoolFactory(_factory).createPool(data);
     }
+
+    function stake(address stakingPool, address token, uint amount, address onBehalf) external {
+        TransferHelper.safeTransferFrom(token, msg.sender, address(this), amount);
+
+        if (IERC20(token).allowance(address(this), stakingPool) < amount) {
+            TransferHelper.safeApprove(token, stakingPool, type(uint).max);
+        }
+
+        IStakingPool(stakingPool).stake(amount, onBehalf);
+    }
 }
 
 
@@ -2412,6 +2566,7 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 pragma solidity ^0.8.0;
+/// @notice The vault stores all tokens supporting internal transfers to save gas.
 contract SyncSwapVault is IVault, Lock {
 
     address private constant NATIVE_ETH = address(0);
@@ -2440,12 +2595,14 @@ contract SyncSwapVault is IVault, Lock {
         return balances[token][owner];
     }
 
+    // Deposit
+
     function deposit(address token, address to) public payable override lock returns (uint amount) {
         if (token == NATIVE_ETH) {
             // Use `msg.value` as amount for native ETH.
             amount = msg.value;
         } else {
-            //require(msg.value == 0);
+            require(msg.value == 0);
 
             if (token == wETH) {
                 // Ensure the same `reserves` and `balances` as native ETH.
@@ -2472,19 +2629,42 @@ contract SyncSwapVault is IVault, Lock {
         }
     }
 
-    function receiveAndDeposit(address token, address to, uint amount) external payable override lock {
+    function depositETH(address to) external payable override lock returns (uint amount) {
+        // Use `msg.value` as amount for native ETH.
+        amount = msg.value;
+
+        // Increase token reserve.
+        reserves[NATIVE_ETH] += amount;
+
+        // Increase token balance for recipient.
+        unchecked {
+            /// `balances` cannot overflow if `reserves` doesn't overflow.
+            balances[NATIVE_ETH][to] += amount;
+        }
+    }
+
+    // Transfer tokens from sender and deposit, requires approval.
+    function transferAndDeposit(address token, address to, uint amount) external payable override lock {
         if (token == NATIVE_ETH) {
             require(amount == msg.value);
         } else {
-            // Receive ERC20 tokens from sender.
-            TransferHelper.safeTransferFrom(token, msg.sender, address(this), amount);
+            require(msg.value == 0);
 
             if (token == wETH) {
                 // Ensure the same `reserves` and `balances` as native ETH.
                 token = NATIVE_ETH;
 
+                // Receive wETH from sender.
+                IWETH(wETH).transferFrom(msg.sender, address(this), amount);
+
                 // Unwrap wETH to native ETH.
                 IWETH(wETH).withdraw(amount);
+            } else {
+                // Receive ERC20 tokens from sender.
+                TransferHelper.safeTransferFrom(token, msg.sender, address(this), amount);
+
+                // Derive real amount with balance and reserve for ERC20 tokens.
+                amount = IERC20(token).balanceOf(address(this)) - reserves[token];
             }
         }
 
@@ -2497,6 +2677,8 @@ contract SyncSwapVault is IVault, Lock {
             balances[token][to] += amount;
         }
     }
+
+    // Transfer
 
     function transfer(address token, address to, uint amount) external override lock {
         // Ensure the same `reserves` and `balances` as native ETH.
@@ -2514,6 +2696,16 @@ contract SyncSwapVault is IVault, Lock {
         }
     }
 
+    // Withdraw
+
+    function _wrapAndTransferWETH(address to, uint amount) private {
+        // Wrap native ETH to wETH.
+        IWETH(wETH).deposit{value: amount}();
+
+        // Send wETH to recipient.
+        IWETH(wETH).transfer(to, amount);
+    }
+
     function withdraw(address token, address to, uint amount) external override lock {
         if (token == NATIVE_ETH) {
             // Send native ETH to recipient.
@@ -2523,11 +2715,7 @@ contract SyncSwapVault is IVault, Lock {
                 // Ensure the same `reserves` and `balances` as native ETH.
                 token = NATIVE_ETH;
 
-                // Wrap native ETH to wETH.
-                IWETH(wETH).deposit{value: amount}();
-
-                // Send wETH to recipient.
-                IWETH(wETH).transfer(to, amount);
+                _wrapAndTransferWETH(to, amount);
             } else {
                 // Send ERC20 tokens to recipient.
                 TransferHelper.safeTransfer(token, to, amount);
@@ -2541,6 +2729,59 @@ contract SyncSwapVault is IVault, Lock {
         unchecked {
             /// `reserves` cannot underflow if `balances` doesn't underflow.
             reserves[token] -= amount;
+        }
+    }
+
+    // Withdraw with mode.
+    // 0 = DEFAULT
+    // 1 = UNWRAPPED
+    // 2 = WRAPPED
+    function withdrawAlternative(address token, address to, uint amount, uint8 mode) external override lock {
+        if (token == NATIVE_ETH) {
+            if (mode == 2) {
+                _wrapAndTransferWETH(to, amount);
+            } else {
+                // Send native ETH to recipient.
+                TransferHelper.safeTransferETH(to, amount);
+            }
+        } else {
+            if (token == wETH) {
+                // Ensure the same `reserves` and `balances` as native ETH.
+                token = NATIVE_ETH;
+
+                if (mode == 1) {
+                    // Send native ETH to recipient.
+                    TransferHelper.safeTransferETH(to, amount);
+                } else {
+                    _wrapAndTransferWETH(to, amount);
+                }
+            } else {
+                // Send ERC20 tokens to recipient.
+                TransferHelper.safeTransfer(token, to, amount);
+            }
+        }
+
+        // Decrease token balance for sender.
+        balances[token][msg.sender] -= amount;
+
+        // Decrease token reserve.
+        unchecked {
+            /// `reserves` cannot underflow if `balances` doesn't underflow.
+            reserves[token] -= amount;
+        }
+    }
+
+    function withdrawETH(address to, uint amount) external override lock {
+        // Send native ETH to recipient.
+        TransferHelper.safeTransferETH(to, amount);
+
+        // Decrease token balance for sender.
+        balances[NATIVE_ETH][msg.sender] -= amount;
+
+        // Decrease token reserve.
+        unchecked {
+            /// `reserves` cannot underflow if `balances` doesn't underflow.
+            reserves[NATIVE_ETH] -= amount;
         }
     }
 }

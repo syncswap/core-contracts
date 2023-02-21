@@ -28,7 +28,7 @@ abstract contract Ownable {
 
     function acceptOwnership() external {
         address _pendingOwner = pendingOwner;
-        if (msg.sender != _pendingOwner) {
+        if (_pendingOwner != msg.sender) {
             revert NotPendingOwner();
         }
         _transferOwnership(_pendingOwner);

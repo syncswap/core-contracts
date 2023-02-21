@@ -17,8 +17,8 @@ error InvalidSignature();
  * https://github.com/transmissions11/solmate/blob/bff24e835192470ed38bf15dbed6084c2d723ace/src/tokens/ERC20.sol
  */
 contract SyncSwapLPToken is IERC20Permit2 {
-    string public constant override name = "SyncSwap LP Token";
-    string public constant override symbol = "SSLP";
+    string public override name;
+    string public override symbol;
     uint8 public immutable override decimals = 18;
 
     uint public override totalSupply;
@@ -41,17 +41,22 @@ contract SyncSwapLPToken is IERC20Permit2 {
         );
     }
 
+    function _initializeMetadata(string memory _name, string memory _symbol) internal {
+        name = _name;
+        symbol = _symbol;
+    }
+
     function _approve(address _owner, address _spender, uint _amount) private {
         allowance[_owner][_spender] = _amount;
         emit Approval(_owner, _spender, _amount);
     }
 
-    function approve(address _spender, uint _amount) external returns (bool) {
+    function approve(address _spender, uint _amount) public override returns (bool) {
         _approve(msg.sender, _spender, _amount);
         return true;
     }
 
-    function transfer(address _to, uint _amount) external override returns (bool) {
+    function transfer(address _to, uint _amount) public override returns (bool) {
         balanceOf[msg.sender] -= _amount;
 
         // Cannot overflow because the sum of all user balances can't exceed the max uint256 value.
@@ -63,7 +68,7 @@ contract SyncSwapLPToken is IERC20Permit2 {
         return true;
     }
 
-    function transferFrom(address _from, address _to, uint _amount) external override returns (bool) {
+    function transferFrom(address _from, address _to, uint _amount) public override returns (bool) {
         uint256 _allowed = allowance[_from][msg.sender]; // Saves gas for limited approvals.
         if (_allowed != type(uint).max) {
             allowance[_from][msg.sender] = _allowed - _amount;
@@ -132,7 +137,7 @@ contract SyncSwapLPToken is IERC20Permit2 {
         uint8 _v,
         bytes32 _r,
         bytes32 _s
-    ) external override ensures(_deadline) {
+    ) public override ensures(_deadline) {
         bytes32 _hash = _permitHash(_owner, _spender, _amount, _deadline);
         address _recoveredAddress = ecrecover(_hash, _v, _r, _s);
 
@@ -149,7 +154,7 @@ contract SyncSwapLPToken is IERC20Permit2 {
         uint _amount,
         uint _deadline,
         bytes calldata _signature
-    ) external override ensures(_deadline) {
+    ) public override ensures(_deadline) {
         bytes32 _hash = _permitHash(_owner, _spender, _amount, _deadline);
 
         if (!SignatureChecker.isValidSignatureNow(_owner, _hash, _signature)) {

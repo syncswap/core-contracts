@@ -8,17 +8,33 @@ interface IPool {
         uint amount;
     }
 
-    function poolType() external view returns (uint16);
+    /// @dev Returns the address of pool master.
     function master() external view returns (address);
+
+    /// @dev Returns the vault.
     function vault() external view returns (address);
 
+    /// @dev Returns the pool type.
+    function poolType() external view returns (uint16);
+
+    /// @dev Returns the assets of the pool.
     function getAssets() external view returns (address[] memory assets);
 
+    /// @dev Returns the swap fee of the pool.
+    function getSwapFee() external view returns (uint24 swapFee);
+
+    /// @dev Returns the protocol fee of the pool.
+    function getProtocolFee() external view returns (uint24 protocolFee);
+
+    /// @dev Mints liquidity.
     function mint(bytes calldata data) external returns (uint liquidity);
 
+    /// @dev Burns liquidity.
     function burn(bytes calldata data) external returns (TokenAmount[] memory amounts);
+
+    /// @dev Burns liquidity with single output token.
     function burnSingle(bytes calldata data) external returns (uint amountOut);
 
+    /// @dev Swaps between tokens.
     function swap(bytes calldata data) external returns (uint amountOut);
-    //function flashSwap(bytes calldata data) external returns (uint amountIn0, uint amountIn1);
 }

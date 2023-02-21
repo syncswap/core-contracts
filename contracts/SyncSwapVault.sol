@@ -9,13 +9,14 @@ import "./interfaces/token/IERC20.sol";
 import "./libraries/Lock.sol";
 import "./libraries/TransferHelper.sol";
 
+/// @notice The vault stores all tokens supporting internal transfers to save gas.
 contract SyncSwapVault is IVault, Lock {
 
     address private constant NATIVE_ETH = address(0);
     address public immutable override wETH;
 
-    mapping(address => mapping(address => uint)) private balances;
-    mapping(address => uint) public override reserves;
+    mapping(address => mapping(address => uint)) private balances; // token -> account -> balance
+    mapping(address => uint) public override reserves; // token -> reserve
 
     constructor(address _wETH) {
         wETH = _wETH;
@@ -40,13 +41,11 @@ contract SyncSwapVault is IVault, Lock {
     // Deposit
 
     function deposit(address token, address to) public payable override lock returns (uint amount) {
-        if (msg.value != 0/*token == NATIVE_ETH*/) {
-            //require(token == NATIVE_ETH);
-
+        if (token == NATIVE_ETH) {
             // Use `msg.value` as amount for native ETH.
             amount = msg.value;
         } else {
-            //require(msg.value == 0);
+            require(msg.value == 0);
 
             if (token == wETH) {
                 // Ensure the same `reserves` and `balances` as native ETH.
@@ -87,11 +86,13 @@ contract SyncSwapVault is IVault, Lock {
         }
     }
 
-    function receiveAndDeposit(address token, address to, uint amount) external payable override lock {
-        if (msg.value != 0/*token == NATIVE_ETH*/) {
-            //require(token == NATIVE_ETH);
+    // Transfer tokens from sender and deposit, requires approval.
+    function transferAndDeposit(address token, address to, uint amount) external payable override lock {
+        if (token == NATIVE_ETH) {
             require(amount == msg.value);
         } else {
+            require(msg.value == 0);
+
             if (token == wETH) {
                 // Ensure the same `reserves` and `balances` as native ETH.
                 token = NATIVE_ETH;
@@ -102,9 +103,11 @@ contract SyncSwapVault is IVault, Lock {
                 // Unwrap wETH to native ETH.
                 IWETH(wETH).withdraw(amount);
             } else {
-                // TODO diff to ensure real amount?
                 // Receive ERC20 tokens from sender.
                 TransferHelper.safeTransferFrom(token, msg.sender, address(this), amount);
+
+                // Derive real amount with balance and reserve for ERC20 tokens.
+                amount = IERC20(token).balanceOf(address(this)) - reserves[token];
             }
         }
 
@@ -138,6 +141,14 @@ contract SyncSwapVault is IVault, Lock {
 
     // Withdraw
 
+    function _wrapAndTransferWETH(address to, uint amount) private {
+        // Wrap native ETH to wETH.
+        IWETH(wETH).deposit{value: amount}();
+
+        // Send wETH to recipient.
+        IWETH(wETH).transfer(to, amount);
+    }
+
     function withdraw(address token, address to, uint amount) external override lock {
         if (token == NATIVE_ETH) {
             // Send native ETH to recipient.
@@ -147,11 +158,7 @@ contract SyncSwapVault is IVault, Lock {
                 // Ensure the same `reserves` and `balances` as native ETH.
                 token = NATIVE_ETH;
 
-                // Wrap native ETH to wETH.
-                IWETH(wETH).deposit{value: amount}();
-
-                // Send wETH to recipient.
-                IWETH(wETH).transfer(to, amount);
+                _wrapAndTransferWETH(to, amount);
             } else {
                 // Send ERC20 tokens to recipient.
                 TransferHelper.safeTransfer(token, to, amount);
@@ -168,33 +175,28 @@ contract SyncSwapVault is IVault, Lock {
         }
     }
 
-    // Withdraw native ETH or wETH if possible, otherwise, ERC20 tokens.
-    function withdrawAlternative(address token, address to, uint amount, bool unwrapETH) external override lock {
+    // Withdraw with mode.
+    // 0 = DEFAULT
+    // 1 = UNWRAPPED
+    // 2 = WRAPPED
+    function withdrawAlternative(address token, address to, uint amount, uint8 mode) external override lock {
         if (token == NATIVE_ETH) {
-            if (unwrapETH) {
+            if (mode == 2) {
+                _wrapAndTransferWETH(to, amount);
+            } else {
                 // Send native ETH to recipient.
                 TransferHelper.safeTransferETH(to, amount);
-            } else {
-                // Wrap native ETH to wETH.
-                IWETH(wETH).deposit{value: amount}();
-
-                // Send wETH to recipient.
-                IWETH(wETH).transfer(to, amount);
             }
         } else {
             if (token == wETH) {
                 // Ensure the same `reserves` and `balances` as native ETH.
                 token = NATIVE_ETH;
 
-                if (unwrapETH) {
+                if (mode == 1) {
                     // Send native ETH to recipient.
                     TransferHelper.safeTransferETH(to, amount);
                 } else {
-                    // Wrap native ETH to wETH.
-                    IWETH(wETH).deposit{value: amount}();
-
-                    // Send wETH to recipient.
-                    IWETH(wETH).transfer(to, amount);
+                    _wrapAndTransferWETH(to, amount);
                 }
             } else {
                 // Send ERC20 tokens to recipient.

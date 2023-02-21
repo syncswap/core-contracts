@@ -50,21 +50,21 @@ async function mint() {
 
 async function burn() {
   const data = defaultAbiCoder.encode(
-    ["address", "bool"], [wallet.address, true] // always withdraw to user.
+    ["address", "uint8"], [wallet.address, 1] // 1 = UNWRAPPED
   );
   return pool.burn(data);
 }
 
 async function burnSingle(tokenOut: string) {
   const data = defaultAbiCoder.encode(
-    ["address", "address", "bool"], [tokenOut, wallet.address, true] // always withdraw to user.
+    ["address", "address", "uint8"], [tokenOut, wallet.address, 1] // 1 = UNWRAPPED
   );
   return pool.burnSingle(data);
 }
 
 async function swap(tokenIn: string) {
   const data = defaultAbiCoder.encode(
-    ["address", "address", "bool"], [tokenIn, wallet.address, true] // always withdraw to user.
+    ["address", "address", "uint8"], [tokenIn, wallet.address, 1] // 1 = UNWRAPPED
   );
   return pool.swap(data);
 }

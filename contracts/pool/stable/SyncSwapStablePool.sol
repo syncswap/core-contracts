@@ -5,6 +5,7 @@ pragma solidity ^0.8.0;
 import "../../libraries/Lock.sol";
 import "../../libraries/Math.sol";
 import "../../libraries/StableMath.sol";
+import "../../libraries/MetadataHelper.sol";
 
 import "../../interfaces/IVault.sol";
 import "../../interfaces/IPoolMaster.sol";
@@ -51,14 +52,31 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
     /// @dev Factory must ensures that the parameters are valid.
     constructor() {
         (bytes memory _deployData) = IPoolFactory(msg.sender).getDeployData();
-        (address _master, address _token0, address _token1, uint _token0PrecisionMultiplier, uint _token1PrecisionMultiplier) = abi.decode(
-            _deployData, (address, address, address, uint, uint)
+        (address _token0, address _token1, uint _token0PrecisionMultiplier, uint _token1PrecisionMultiplier) = abi.decode(
+            _deployData, (address, address, uint, uint)
+        );
+        address _master = IPoolFactory(msg.sender).master();
+
+        master = _master;
+        vault = IPoolMaster(_master).vault();
+        (token0, token1, token0PrecisionMultiplier, token1PrecisionMultiplier) = (
+            _token0, _token1, _token0PrecisionMultiplier, _token1PrecisionMultiplier
         );
 
-        vault = IPoolMaster(_master).vault();
-        (master, token0, token1, token0PrecisionMultiplier, token1PrecisionMultiplier) = (
-            _master, _token0, _token1, _token0PrecisionMultiplier, _token1PrecisionMultiplier
-        );
+        // try to set symbols for the LP token
+        (bool _success0, string memory _symbol0) = MetadataHelper.getSymbol(_token0);
+        (bool _success1, string memory _symbol1) = MetadataHelper.getSymbol(_token1);
+        if (_success0 && _success1) {
+            _initializeMetadata(
+                string(abi.encodePacked("SyncSwap ", _symbol0, "/", _symbol1, " Stable LP")),
+                string(abi.encodePacked(_symbol0, "/", _symbol1, " sSLP"))
+            );
+        } else {
+            _initializeMetadata(
+                "SyncSwap Stable LP",
+                "sSLP"
+            );
+        }
     }
 
     function getAssets() external view override returns (address[] memory assets) {
@@ -220,9 +238,9 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
             _amountOut = _getAmountOut(_amountIn, _reserve0, _reserve1, true);
             _balance1 -= _amountOut;
 
-            emit Swap(msg.sender, _amountIn, 0, 0, _amountOut, _to); // emit here to avoid checking direction 
+            emit Swap(msg.sender, _amountIn, 0, 0, _amountOut, _to);
         } else {
-            require(_tokenIn == token1); // ensures to prevent counterfeit event parameters.
+            //require(_tokenIn == token1);
             _tokenOut = token0;
             // Cannot underflow because reserve will never be larger than balance.
             unchecked {
@@ -231,7 +249,7 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
             _amountOut = _getAmountOut(_amountIn, _reserve0, _reserve1, false);
             _balance0 -= _amountOut;
 
-            emit Swap(msg.sender, 0, _amountIn, _amountOut, 0, _to); // emit here to avoid checking direction 
+            emit Swap(msg.sender, 0, _amountIn, _amountOut, 0, _to);
         }
 
         // Transfers output tokens.
@@ -240,6 +258,14 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
         // Update reserves with up-to-date balances (updated above).
         /// @dev Using counterfactuals balances here to save gas.
         _updateReserves(_balance0, _balance1);
+    }
+
+    function getSwapFee() public view override returns (uint24 _swapFee) {
+        _swapFee = IPoolMaster(master).getSwapFee(address(this));
+    }
+
+    function getProtocolFee() public view override returns (uint24 _protocolFee) {
+        _protocolFee = IPoolMaster(master).protocolFee(poolType);
     }
 
     function _updateReserves(uint _balance0, uint _balance1) private {
@@ -251,17 +277,13 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
         if (withdrawMode == 0) {
             IVault(vault).transfer(token, to, amount);
         } else {
-            IVault(vault).withdrawAlternative(token, to, amount, withdrawMode == 1);
+            IVault(vault).withdrawAlternative(token, to, amount, withdrawMode);
         }
     }
 
     function _balances() private view returns (uint balance0, uint balance1) {
         balance0 = IVault(vault).balanceOf(token0, address(this));
         balance1 = IVault(vault).balanceOf(token1, address(this));
-    }
-
-    function _getSwapFee() private view returns (uint24 _swapFee) {
-        _swapFee = IPoolMaster(master).getSwapFee(address(this));
     }
 
     /// @dev This fee is charged to cover for the swap fee when users add unbalanced liquidity.
@@ -276,10 +298,10 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
         }
         uint _amount1Optimal = (_amount0 * _reserve1) / _reserve0;
         if (_amount1 >= _amount1Optimal) {
-            _token1Fee = (_getSwapFee() * (_amount1 - _amount1Optimal)) / (2 * MAX_FEE);
+            _token1Fee = (getSwapFee() * (_amount1 - _amount1Optimal)) / (2 * MAX_FEE);
         } else {
             uint _amount0Optimal = (_amount1 * _reserve0) / _reserve1;
-            _token0Fee = (_getSwapFee() * (_amount0 - _amount0Optimal)) / (2 * MAX_FEE);
+            _token0Fee = (getSwapFee() * (_amount0 - _amount0Optimal)) / (2 * MAX_FEE);
         }
     }
 
@@ -295,7 +317,7 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
             if (_feeOn) {
                 if (_invariant > _invariantLast) {
                     /// @dev Mints `protocolFee` % of growth in liquidity (invariant).
-                    uint _protocolFee = IPoolMaster(master).protocolFee(poolType);
+                    uint _protocolFee = getProtocolFee();
                     uint _numerator = _totalSupply * (_invariant - _invariantLast) * _protocolFee;
                     uint _denominator = (MAX_FEE - _protocolFee) * _invariant + _protocolFee * _invariantLast;
                     uint _liquidity = _numerator / _denominator;
@@ -338,7 +360,7 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
             unchecked {
                 uint _adjustedReserve0 = _reserve0 * token0PrecisionMultiplier;
                 uint _adjustedReserve1 = _reserve1 * token1PrecisionMultiplier;
-                uint _feeDeductedAmountIn = _amountIn - (_amountIn * _getSwapFee()) / MAX_FEE;
+                uint _feeDeductedAmountIn = _amountIn - (_amountIn * getSwapFee()) / MAX_FEE;
                 uint _d = StableMath.computeDFromAdjustedBalances(_adjustedReserve0, _adjustedReserve1);
 
                 if (_token0In) {
@@ -371,20 +393,20 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, Lock {
                 uint _d = StableMath.computeDFromAdjustedBalances(_adjustedReserve0, _adjustedReserve1);
 
                 if (_token0Out) {
-                    uint _y = _adjustedReserve0 - _amountOut;
+                    uint _y = _adjustedReserve0 - (_amountOut * token0PrecisionMultiplier);
                     if (_y <= 1) {
                         return 1;
                     }
                     uint _x = StableMath.getY(_y, _d);
-                    _dx = MAX_FEE * (_x - _adjustedReserve1) / (MAX_FEE - _getSwapFee()) + 1;
+                    _dx = MAX_FEE * (_x - _adjustedReserve1) / (MAX_FEE - getSwapFee()) + 1;
                     _dx /= token1PrecisionMultiplier;
                 } else {
-                    uint _y = _adjustedReserve1 - _amountOut;
+                    uint _y = _adjustedReserve1 - (_amountOut * token1PrecisionMultiplier);
                     if (_y <= 1) {
                         return 1;
                     }
                     uint _x = StableMath.getY(_y, _d);
-                    _dx = MAX_FEE * (_x - _adjustedReserve0) / (MAX_FEE - _getSwapFee()) + 1;
+                    _dx = MAX_FEE * (_x - _adjustedReserve0) / (MAX_FEE - getSwapFee()) + 1;
                     _dx /= token0PrecisionMultiplier;
                 }
             }

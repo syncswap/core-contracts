@@ -5,6 +5,7 @@ pragma solidity ^0.8.0;
 import "./interfaces/IWETH.sol";
 import "./interfaces/IVault.sol";
 import "./interfaces/IRouter.sol";
+import "./interfaces/IStakingPool.sol";
 import "./interfaces/pool/IPool.sol";
 import "./interfaces/pool/IBasePool.sol";
 import "./interfaces/token/IERC20Permit.sol";
@@ -19,6 +20,13 @@ error NotEnoughLiquidityMinted();
 error TooLittleReceived();
 error Expired();
 
+/// @notice The router is a universal interface for users to access
+/// functions across different protocol parts in one place.
+///
+/// It handles the allowances and transfers of tokens, and
+/// allows chained swaps/operations across multiple pools, with
+/// additional features like slippage protection and permit support.
+///
 contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
 
     struct TokenInput {
@@ -52,12 +60,8 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
     // Add Liquidity
     function _transferFromSender(address token, address to, uint amount) private {
         if (token == NATIVE_ETH) {
-            // Wrap native ETH to wETH.
-            //IWETH(wETH).deposit{value: msg.value}();
-
-            // Send wETH to recipient.
-            //require(IWETH(wETH).transfer(to, amount));
-            IVault(vault).deposit{value: msg.value}(token, to);
+            // Deposit ETH to the vault.
+            IVault(vault).deposit{value: amount}(token, to);
         } else {
             // Transfer tokens to the vault.
             TransferHelper.safeTransferFrom(token, msg.sender, vault, amount);
@@ -209,7 +213,7 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
         );
     }
 
-    // Remove Liquidity Single
+    // Burn Liquidity Single
     function _transferAndBurnLiquiditySingle(
         address pool,
         uint liquidity,
@@ -273,7 +277,6 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
         SwapPath memory path;
         SwapStep memory step;
         uint stepsLength;
-        uint j;
 
         for (uint i; i < pathsLength; ) {
             path = paths[i];
@@ -285,16 +288,17 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
             // Cache steps length.
             stepsLength = path.steps.length;
 
-            for (; j < stepsLength; ) {
-                if (j < stepsLength - 1) {
+            for (uint j; j < stepsLength; ) {
+                if (j == stepsLength - 1) {
+                    // Accumulate output amount at the last step.
+                    amountOut += IBasePool(step.pool).swap(step.data);
+                    break;
+                } else {
                     // Swap and send tokens to the next step.
                     IBasePool(step.pool).swap(step.data);
 
                     // Cache the next step.
                     step = path.steps[j + 1];
-                } else {
-                    // Accumulate output amount at the last step.
-                    amountOut += IBasePool(step.pool).swap(step.data);
                 }
 
                 unchecked {
@@ -349,5 +353,15 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
     /// @notice Wrapper function to allow pool deployment to be batched.
     function createPool(address _factory, bytes calldata data) external payable returns (address) {
         return IPoolFactory(_factory).createPool(data);
+    }
+
+    function stake(address stakingPool, address token, uint amount, address onBehalf) external {
+        TransferHelper.safeTransferFrom(token, msg.sender, address(this), amount);
+
+        if (IERC20(token).allowance(address(this), stakingPool) < amount) {
+            TransferHelper.safeApprove(token, stakingPool, type(uint).max);
+        }
+
+        IStakingPool(stakingPool).stake(amount, onBehalf);
     }
 }

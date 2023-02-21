@@ -2,8 +2,22 @@
 
 pragma solidity ^0.8.0;
 
- /// @dev Modified from Solmate (https://github.com/Rari-Capital/solmate/blob/main/src/utils/FixedPointMathLib.sol)
+/// @dev Math functions.
+/// @dev Modified from Solmate (https://github.com/Rari-Capital/solmate/blob/main/src/utils/FixedPointMathLib.sol)
 library Math {
+
+    /// @notice Compares a and b and returns 'true' if the difference between a and b
+    /// is less than 1 or equal to each other.
+    /// @param a uint256 to compare with.
+    /// @param b uint256 to compare with.
+    function within1(uint256 a, uint256 b) internal pure returns (bool) {
+        unchecked {
+            if (a > b) {
+                return a - b <= 1;
+            }
+            return b - a <= 1;
+        }
+    }
 
     function sqrt(uint256 x) internal pure returns (uint256 z) {
         assembly {
@@ -68,6 +82,8 @@ library Math {
             z := sub(z, lt(div(x, z), z))
         }
     }
+
+    // Mul Div
 
     /// @dev Rounded down.
     function mulDiv(
@@ -152,20 +168,10 @@ library Math {
         }
     }
 
-    /// @notice Compares a and b and returns 'true' if the difference between a and b
-    /// is less than 1 or equal to each other.
-    /// @param a uint256 to compare with.
-    /// @param b uint256 to compare with.
-    function within1(uint256 a, uint256 b) internal pure returns (bool) {
-        unchecked {
-            if (a > b) {
-                return a - b <= 1;
-            }
-            return b - a <= 1;
-        }
-    }
+    // Mul
 
     /// @dev Optimized safe multiplication operation for minimal gas cost.
+    /// Equivalent to *
     function mul(
         uint256 x,
         uint256 y
@@ -198,7 +204,10 @@ library Math {
         }
     }
 
+    // Div
+
     /// @dev Optimized safe division operation for minimal gas cost.
+    /// Equivalent to /
     function div(
         uint256 x,
         uint256 y
@@ -214,8 +223,8 @@ library Math {
         }
     }
 
-    /// @dev Optimized unsafe division operation for minimal gas cost
-    /// - division by 0 will not reverts and returns 0, and must be checked externally.
+    /// @dev Optimized unsafe division operation for minimal gas cost.
+    /// Division by 0 will not reverts and returns 0, and must be checked externally.
     function divUnsafeLast(
         uint256 x,
         uint256 y
