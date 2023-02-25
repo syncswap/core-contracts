@@ -7,8 +7,8 @@ import "../interfaces/token/IERC20Permit2.sol";
 abstract contract SelfPermit {
     function selfPermit(
         address token,
-        uint256 value,
-        uint256 deadline,
+        uint value,
+        uint deadline,
         uint8 v,
         bytes32 r,
         bytes32 s
@@ -18,8 +18,8 @@ abstract contract SelfPermit {
 
     function selfPermitIfNecessary(
         address token,
-        uint256 value,
-        uint256 deadline,
+        uint value,
+        uint deadline,
         uint8 v,
         bytes32 r,
         bytes32 s
@@ -31,8 +31,8 @@ abstract contract SelfPermit {
 
     function selfPermit2(
         address token,
-        uint256 value,
-        uint256 deadline,
+        uint value,
+        uint deadline,
         bytes calldata signature
     ) public payable {
         IERC20Permit2(token).permit2(msg.sender, address(this), value, deadline, signature);
@@ -40,8 +40,8 @@ abstract contract SelfPermit {
 
     function selfPermit2IfNecessary(
         address token,
-        uint256 value,
-        uint256 deadline,
+        uint value,
+        uint deadline,
         bytes calldata signature
     ) external payable {
         if (IERC20(token).allowance(msg.sender, address(this)) < value) {

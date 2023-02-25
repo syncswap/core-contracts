@@ -3,9 +3,9 @@
 pragma solidity ^0.8.0;
 
 import "./interfaces/IWETH.sol";
-import "./interfaces/IVault.sol";
 import "./interfaces/IRouter.sol";
 import "./interfaces/IStakingPool.sol";
+import "./interfaces/vault/IVault.sol";
 import "./interfaces/pool/IPool.sol";
 import "./interfaces/pool/IBasePool.sol";
 import "./interfaces/token/IERC20Permit.sol";
@@ -277,6 +277,7 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
         SwapPath memory path;
         SwapStep memory step;
         uint stepsLength;
+        uint j;
 
         for (uint i; i < pathsLength; ) {
             path = paths[i];
@@ -288,7 +289,7 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
             // Cache steps length.
             stepsLength = path.steps.length;
 
-            for (uint j; j < stepsLength; ) {
+            for (j = 0; j < stepsLength; ) {
                 if (j == stepsLength - 1) {
                     // Accumulate output amount at the last step.
                     amountOut += IBasePool(step.pool).swap(step.data);

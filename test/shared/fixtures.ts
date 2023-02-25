@@ -15,9 +15,17 @@ export async function deployVault(weth: string): Promise<Contract> {
     return contract;
 }
 
+export async function deployFeeManager(feeRecipient: string): Promise<Contract> {
+    const contractFactory = await ethers.getContractFactory('SyncSwapFeeManager');
+    const contract = await contractFactory.deploy(feeRecipient);
+    await contract.deployed();
+    return contract;
+}
+
 export async function deployPoolMaster(vault: string, feeRecipient: string): Promise<Contract> {
+    const feeManager = await deployFeeManager(feeRecipient);
     const contractFactory = await ethers.getContractFactory('SyncSwapPoolMaster');
-    const contract = await contractFactory.deploy(vault, feeRecipient);
+    const contract = await contractFactory.deploy(vault, feeManager.address);
     await contract.deployed();
     return contract;
 }
@@ -61,15 +69,17 @@ interface PoolFixture {
 
 export async function classicPoolFixture(
     wallet: SignerWithAddress,
-    feeRecipient: string
+    feeRecipient: string,
+    deflating0: boolean,
+    deflating1: boolean,
 ): Promise<PoolFixture> {
     const weth = await deployWETH9();
     const vault = await deployVault(weth.address);
     const master = await deployPoolMaster(vault.address, feeRecipient);
     const factory = await deployClassicPoolFactory(master);
 
-    const tokenA = await deploySyncSwapLPToken(MAX_UINT256);
-    const tokenB = await deploySyncSwapLPToken(MAX_UINT256);
+    const tokenA = deflating0 ? await deployDeflatingERC20(MAX_UINT256) : await deploySyncSwapLPToken(MAX_UINT256);
+    const tokenB = deflating1 ? await deployDeflatingERC20(MAX_UINT256) : await deploySyncSwapLPToken(MAX_UINT256);
     const data = defaultAbiCoder.encode(
         ["address", "address"], [tokenA.address, tokenB.address]
     );

@@ -12,7 +12,7 @@ library TransferHelper {
     function safeApprove(
         address token,
         address to,
-        uint256 value
+        uint value
     ) internal {
         // bytes4(keccak256(bytes("approve(address,uint256)")));
         // solhint-disable-next-line avoid-low-level-calls
@@ -26,7 +26,7 @@ library TransferHelper {
     function safeTransfer(
         address token,
         address to,
-        uint256 value
+        uint value
     ) internal {
         // bytes4(keccak256(bytes("transfer(address,uint256)")));
         // solhint-disable-next-line avoid-low-level-calls
@@ -41,7 +41,7 @@ library TransferHelper {
         address token,
         address from,
         address to,
-        uint256 value
+        uint value
     ) internal {
         // bytes4(keccak256(bytes("transferFrom(address,address,uint256)")));
         // solhint-disable-next-line avoid-low-level-calls
@@ -52,7 +52,7 @@ library TransferHelper {
         }
     }
 
-    function safeTransferETH(address to, uint256 value) internal {
+    function safeTransferETH(address to, uint value) internal {
         // solhint-disable-next-line avoid-low-level-calls
         (bool success, ) = to.call{value: value}(new bytes(0));
 

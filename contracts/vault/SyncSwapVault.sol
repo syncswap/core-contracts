@@ -2,15 +2,16 @@
 
 pragma solidity ^0.8.0;
 
-import "./interfaces/IVault.sol";
-import "./interfaces/IWETH.sol";
-import "./interfaces/token/IERC20.sol";
+import "../interfaces/IWETH.sol";
+import "../interfaces/token/IERC20.sol";
 
-import "./libraries/Lock.sol";
-import "./libraries/TransferHelper.sol";
+import "../libraries/ReentrancyGuard.sol";
+import "../libraries/TransferHelper.sol";
+
+import "./VaultFlashLoans.sol";
 
 /// @notice The vault stores all tokens supporting internal transfers to save gas.
-contract SyncSwapVault is IVault, Lock {
+contract SyncSwapVault is VaultFlashLoans {
 
     address private constant NATIVE_ETH = address(0);
     address public immutable override wETH;
@@ -18,7 +19,7 @@ contract SyncSwapVault is IVault, Lock {
     mapping(address => mapping(address => uint)) private balances; // token -> account -> balance
     mapping(address => uint) public override reserves; // token -> reserve
 
-    constructor(address _wETH) {
+    constructor(address _wETH) VaultFlashLoans(msg.sender) {
         wETH = _wETH;
     }
 
@@ -40,7 +41,7 @@ contract SyncSwapVault is IVault, Lock {
 
     // Deposit
 
-    function deposit(address token, address to) public payable override lock returns (uint amount) {
+    function deposit(address token, address to) public payable override nonReentrant returns (uint amount) {
         if (token == NATIVE_ETH) {
             // Use `msg.value` as amount for native ETH.
             amount = msg.value;
@@ -72,7 +73,7 @@ contract SyncSwapVault is IVault, Lock {
         }
     }
 
-    function depositETH(address to) external payable override lock returns (uint amount) {
+    function depositETH(address to) external payable override nonReentrant returns (uint amount) {
         // Use `msg.value` as amount for native ETH.
         amount = msg.value;
 
@@ -87,7 +88,7 @@ contract SyncSwapVault is IVault, Lock {
     }
 
     // Transfer tokens from sender and deposit, requires approval.
-    function transferAndDeposit(address token, address to, uint amount) external payable override lock {
+    function transferAndDeposit(address token, address to, uint amount) external payable override nonReentrant returns (uint) {
         if (token == NATIVE_ETH) {
             require(amount == msg.value);
         } else {
@@ -119,11 +120,13 @@ contract SyncSwapVault is IVault, Lock {
             /// `balances` cannot overflow if `reserves` doesn't overflow.
             balances[token][to] += amount;
         }
+
+        return amount;
     }
 
     // Transfer
 
-    function transfer(address token, address to, uint amount) external override lock {
+    function transfer(address token, address to, uint amount) external override nonReentrant {
         // Ensure the same `reserves` and `balances` as native ETH.
         if (token == wETH) {
             token = NATIVE_ETH;
@@ -149,7 +152,7 @@ contract SyncSwapVault is IVault, Lock {
         IWETH(wETH).transfer(to, amount);
     }
 
-    function withdraw(address token, address to, uint amount) external override lock {
+    function withdraw(address token, address to, uint amount) external override nonReentrant {
         if (token == NATIVE_ETH) {
             // Send native ETH to recipient.
             TransferHelper.safeTransferETH(to, amount);
@@ -179,7 +182,7 @@ contract SyncSwapVault is IVault, Lock {
     // 0 = DEFAULT
     // 1 = UNWRAPPED
     // 2 = WRAPPED
-    function withdrawAlternative(address token, address to, uint amount, uint8 mode) external override lock {
+    function withdrawAlternative(address token, address to, uint amount, uint8 mode) external override nonReentrant {
         if (token == NATIVE_ETH) {
             if (mode == 2) {
                 _wrapAndTransferWETH(to, amount);
@@ -214,7 +217,7 @@ contract SyncSwapVault is IVault, Lock {
         }
     }
 
-    function withdrawETH(address to, uint amount) external override lock {
+    function withdrawETH(address to, uint amount) external override nonReentrant {
         // Send native ETH to recipient.
         TransferHelper.safeTransferETH(to, amount);
 

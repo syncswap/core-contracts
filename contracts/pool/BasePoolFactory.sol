@@ -5,13 +5,9 @@ pragma solidity ^0.8.0;
 import "../interfaces/factory/IBasePoolFactory.sol";
 import "../interfaces/IPoolMaster.sol";
 
-import "../libraries/Ownable.sol";
-
-error NotPoolMaster();
 error InvalidTokens();
-error InvalidFee();
 
-abstract contract BasePoolFactory is IBasePoolFactory, Ownable {
+abstract contract BasePoolFactory is IBasePoolFactory {
     /// @dev The pool master that control fees and registry.
     address public immutable master;
 

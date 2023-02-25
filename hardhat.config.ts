@@ -55,7 +55,7 @@ module.exports = {
     },
 
     goerli: {
-      url: "https://rpc.ankr.com/eth_goerli"
+      url: "https://endpoints.omniatech.io/v1/eth/goerli/public"
     },
 
     // Run compile task with this network to generate `artifacts-zk` and `cache-zk`.

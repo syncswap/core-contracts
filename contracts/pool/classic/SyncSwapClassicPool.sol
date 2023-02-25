@@ -2,12 +2,12 @@
 
 pragma solidity ^0.8.0;
 
-import "../../libraries/Lock.sol";
+import "../../libraries/ReentrancyGuard.sol";
 import "../../libraries/Math.sol";
 import "../../libraries/MetadataHelper.sol";
 
-import "../../interfaces/IVault.sol";
 import "../../interfaces/IPoolMaster.sol";
+import "../../interfaces/vault/IVault.sol";
 import "../../interfaces/factory/IPoolFactory.sol";
 import "../../interfaces/pool/IClassicPool.sol";
 
@@ -15,7 +15,7 @@ import "../SyncSwapLPToken.sol";
 
 error InsufficientLiquidityMinted();
 
-contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
+contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, ReentrancyGuard {
     using Math for uint;
 
     uint private constant MINIMUM_LIQUIDITY = 1000;
@@ -74,7 +74,7 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
 
     /// @dev Mints LP tokens - should be called via the router after transferring pool tokens.
     /// The router should ensure that sufficient LP tokens are minted.
-    function mint(bytes calldata _data) external override lock returns (uint _liquidity) {
+    function mint(bytes calldata _data) external override nonReentrant returns (uint _liquidity) {
         address _to = abi.decode(_data, (address));
         (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
         (uint _balance0, uint _balance1) = _balances();
@@ -120,7 +120,7 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
 
     /// @dev Burns LP tokens sent to this contract.
     /// The router should ensure that sufficient pool tokens are received.
-    function burn(bytes calldata _data) external override lock returns (TokenAmount[] memory _amounts) {
+    function burn(bytes calldata _data) external override nonReentrant returns (TokenAmount[] memory _amounts) {
         (address _to, uint8 _withdrawMode) = abi.decode(_data, (address, uint8));
         (uint _balance0, uint _balance1) = _balances();
         uint _liquidity = balanceOf[address(this)];
@@ -161,7 +161,7 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
     /// @dev Burns LP tokens sent to this contract and swaps one of the output tokens for another
     /// - i.e., the user gets a single token out by burning LP tokens.
     /// The router should ensure that sufficient pool tokens are received.
-    function burnSingle(bytes calldata _data) external override lock returns (uint _amountOut) {
+    function burnSingle(bytes calldata _data) external override nonReentrant returns (uint _amountOut) {
         (address _tokenOut, address _to, uint8 _withdrawMode) = abi.decode(_data, (address, address, uint8));
         (uint _balance0, uint _balance1) = _balances();
         uint _liquidity = balanceOf[address(this)];
@@ -208,7 +208,7 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
 
     /// @dev Swaps one token for another - should be called via the router after transferring input tokens.
     /// The router should ensure that sufficient output tokens are received.
-    function swap(bytes calldata _data) external override lock returns (uint _amountOut) {
+    function swap(bytes calldata _data) external override nonReentrant returns (uint _amountOut) {
         (address _tokenIn, address _to, uint8 _withdrawMode) = abi.decode(_data, (address, address, uint8));
         (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
         (uint _balance0, uint _balance1) = _balances();
@@ -330,7 +330,7 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, Lock {
         _finalAmountOut = _getAmountOut(_amountIn, _reserve0, _reserve1, _tokenIn == token0);
     }
 
-    function getAmountIn(address _tokenOut, uint256 _amountOut) external view override returns (uint _finalAmountIn) {
+    function getAmountIn(address _tokenOut, uint _amountOut) external view override returns (uint _finalAmountIn) {
         (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
         _finalAmountIn = _getAmountIn(_amountOut, _reserve0, _reserve1, _tokenOut == token0);
     }

@@ -2,18 +2,11 @@
 
 pragma solidity >=0.5.0;
 
-/// @dev The master contract to control fees, create pools and manage whitelisted factories.
-/// Management functions are omitted.
-interface IPoolMaster {
-    // Events
-    event SetDefaultSwapFee(uint16 indexed poolType, uint24 defaultSwapFee);
+import "./IFeeManager.sol";
 
-    event SetCustomSwapFee(address indexed pool, uint24 customSwapFee);
-
-    event SetProtocolFee(uint16 indexed poolType, uint24 protocolFee);
-
-    event SetFeeRecipient(address indexed previousFeeRecipient, address indexed newFeeRecipient);
-
+/// @dev The master contract to create pools and manage whitelisted factories.
+/// Inheriting the fee manager interface to support fee queries.
+interface IPoolMaster is IFeeManager {
     event SetFactoryWhitelisted(address indexed factory, bool whitelisted);
 
     event RegisterPool(
@@ -23,21 +16,19 @@ interface IPoolMaster {
         bytes data
     );
 
+    event UpdateFeeManager(address indexed previousFeeManager, address indexed newFeeManager);
+
     function vault() external view returns (address);
 
+    function feeManager() external view returns (address);
+
     // Fees
-    function defaultSwapFee(uint16 poolType) external view returns (uint24);
-
-    function customSwapFee(address pool) external view returns (uint24);
-
-    function feeRecipient() external view returns (address);
-
-    function protocolFee(uint16 poolType) external view returns (uint24);
-    
-    function getSwapFee(address pool) external view returns (uint24 swapFee);
+    function setFeeManager(address) external;
 
     // Factories
     function isFactoryWhitelisted(address) external view returns (bool);
+
+    function setFactoryWhitelisted(address factory, bool whitelisted) external;
 
     // Pools
     function isPool(address) external view returns (bool);
