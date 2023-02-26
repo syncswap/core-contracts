@@ -15,7 +15,7 @@
   "license": "AGPL-3.0-or-later",
   "devDependencies": {
     "@matterlabs/hardhat-zksync-chai-matchers": "^0.1.0",
-    "@matterlabs/hardhat-zksync-deploy": "^0.6.1",
+    "@matterlabs/hardhat-zksync-deploy": "^0.6.2",
     "@matterlabs/hardhat-zksync-solc": "^0.3.14",
     "@matterlabs/hardhat-zksync-toolbox": "^0.1.0",
     "@matterlabs/hardhat-zksync-verify": "^0.1.1",
