@@ -38,11 +38,11 @@ contract SyncSwapFeeManager is IFeeManager, Ownable {
 
         // Prefill fees for known pool types.
         // Classic pools.
-        defaultSwapFee[1] = 300; // 0.3%.
+        defaultSwapFee[1] = 100; // 0.1%.
         protocolFee[1] = 30000; // 30%.
 
         // Stable pools.
-        defaultSwapFee[2] = 100; // 0.1%.
+        defaultSwapFee[2] = 50; // 0.05%.
         protocolFee[2] = 50000; // 50%.
     }
 

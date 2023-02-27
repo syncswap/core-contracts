@@ -22,12 +22,12 @@ export async function deployFeeManager(feeRecipient: string): Promise<Contract> 
     return contract;
 }
 
-export async function deployPoolMaster(vault: string, feeRecipient: string): Promise<Contract> {
+export async function deployPoolMaster(vault: string, feeRecipient: string): Promise<[Contract, Contract]> {
     const feeManager = await deployFeeManager(feeRecipient);
     const contractFactory = await ethers.getContractFactory('SyncSwapPoolMaster');
     const contract = await contractFactory.deploy(vault, feeManager.address);
     await contract.deployed();
-    return contract;
+    return [contract, feeManager];
 }
 
 export async function deployClassicPoolFactory(master: Contract): Promise<Contract> {
@@ -75,7 +75,8 @@ export async function classicPoolFixture(
 ): Promise<PoolFixture> {
     const weth = await deployWETH9();
     const vault = await deployVault(weth.address);
-    const master = await deployPoolMaster(vault.address, feeRecipient);
+    const [master, feeManager] = await deployPoolMaster(vault.address, feeRecipient);
+    feeManager.setDefaultSwapFee(1, 300); // Set fee to 0.3% for testing
     const factory = await deployClassicPoolFactory(master);
 
     const tokenA = deflating0 ? await deployDeflatingERC20(MAX_UINT256) : await deploySyncSwapLPToken(MAX_UINT256);
@@ -100,7 +101,8 @@ export async function stablePoolFixture(
 ): Promise<PoolFixture> {
     const weth = await deployWETH9();
     const vault = await deployVault(weth.address);
-    const master = await deployPoolMaster(vault.address, feeRecipient);
+    const [master, feeManager] = await deployPoolMaster(vault.address, feeRecipient);
+    feeManager.setDefaultSwapFee(2, 100); // Set fee to 0.1% for testing
     const factory = await deployStablePoolFactory(master);
 
     const tokenA = await deploySyncSwapLPToken(MAX_UINT256);
@@ -178,7 +180,7 @@ export async function v2Fixture(): Promise<V2Fixture> {
 
     // deploy core
     const vault = await deployVault(WETH.address);
-    const master = await deployPoolMaster(vault.address, accounts[1].address);
+    const [master, feeManager] = await deployPoolMaster(vault.address, accounts[1].address);
     const classicFactory = await deployClassicPoolFactory(master);
     const stableFactory = await deployStablePoolFactory(master);
 

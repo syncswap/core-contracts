@@ -26,12 +26,13 @@ describe('SyncSwapStablePoolFactory', () => {
   let weth: Contract;
   let vault: Contract;
   let master: Contract;
+  let feeManager: Contract;
   let factory: Contract;
 
   beforeEach(async () => {
     weth = await deployWETH9();
     vault = await deployVault(weth.address);
-    master = await deployPoolMaster(vault.address, wallets[1].address);
+    [master, feeManager] = await deployPoolMaster(vault.address, wallets[1].address);
     factory = await deployStablePoolFactory(master);
   });
 
@@ -85,7 +86,7 @@ describe('SyncSwapStablePoolFactory', () => {
     );
     const tx = await master.createPool(factory.address, data);
     const receipt = await tx.wait();
-    expect(receipt.gasUsed).to.eq(2705899); // 2512920 for Uniswap V2
+    expect(receipt.gasUsed).to.eq(2705902); // 2512920 for Uniswap V2
   });
 
   /*
