@@ -5,6 +5,7 @@ pragma solidity ^0.8.0;
 import "./Math.sol";
 
 library StableMath {
+
     /// @notice Calculate the new balances of the tokens given the indexes of the token
     /// that is swapped from (FROM) and the token that is swapped to (TO).
     /// This function is used as a helper function to calculate how much TO token
@@ -39,6 +40,8 @@ library StableMath {
         }
     }
 
+    // Overflow checks should be applied before calling this function.
+    // The maximum XPs are `3802571709128108338056982581425910818` of uint128.
     function computeDFromAdjustedBalances(uint xp0, uint xp1) internal pure returns (uint computed) {
         uint s = xp0 + xp1;
 

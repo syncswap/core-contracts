@@ -13,6 +13,7 @@ import "../../interfaces/pool/IClassicPool.sol";
 
 import "../SyncSwapLPToken.sol";
 
+error Overflow();
 error InsufficientLiquidityMinted();
 
 contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, ReentrancyGuard {
@@ -93,7 +94,8 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, ReentrancyGuard {
 
         {
         // Calculates old invariant (where unbalanced fee added to) and, mint protocol fee if any.
-        (bool _feeOn, uint _totalSupply, uint _oldInvariant) = _mintProtocolFee(_reserve0, _reserve1);
+        uint _oldInvariant = _computeInvariant(_reserve0, _reserve1);
+        (bool _feeOn, uint _totalSupply) = _mintProtocolFee(0, 0, _oldInvariant);
 
         if (_totalSupply == 0) {
             _liquidity = _newInvariant - MINIMUM_LIQUIDITY;
@@ -126,7 +128,7 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, ReentrancyGuard {
         uint _liquidity = balanceOf[address(this)];
 
         // Mints protocol fee if any.
-        (bool _feeOn, uint _totalSupply, ) = _mintProtocolFee(_balance0, _balance1);
+        (bool _feeOn, uint _totalSupply) = _mintProtocolFee(_balance0, _balance1, 0);
 
         // Calculates amounts of pool tokens proportional to balances.
         uint _amount0 = _liquidity * _balance0 / _totalSupply;
@@ -140,7 +142,7 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, ReentrancyGuard {
 
         // Update reserves and last invariant with up-to-date balances (after transfers).
         /// @dev Using counterfactuals balances here to save gas.
-        /// Cannot underflow because amounts will never be smaller than balances.
+        /// Cannot underflow because amounts are lesser figures derived from balances.
         unchecked {
             _balance0 -= _amount0;
             _balance1 -= _amount1;
@@ -167,7 +169,7 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, ReentrancyGuard {
         uint _liquidity = balanceOf[address(this)];
 
         // Mints protocol fee if any.
-        (bool _feeOn, uint _totalSupply, ) = _mintProtocolFee(_balance0, _balance1);
+        (bool _feeOn, uint _totalSupply) = _mintProtocolFee(_balance0, _balance1, 0);
 
         // Calculates amounts of pool tokens proportional to balances.
         uint _amount0 = _liquidity * _balance0 / _totalSupply;
@@ -218,25 +220,27 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, ReentrancyGuard {
         address _tokenOut;
         if (_tokenIn == token0) {
             _tokenOut = token1;
-            // Cannot underflow because reserve will never be larger than balance.
-            unchecked {
-                _amountIn = _balance0 - _reserve0;
-            }
+            _amountIn = _balance0 - _reserve0;
             _amountOut = _getAmountOut(_amountIn, _reserve0, _reserve1, true);
             _balance1 -= _amountOut;
 
             emit Swap(msg.sender, _amountIn, 0, 0, _amountOut, _to); // emit here to avoid checking direction 
         } else {
-            require(_tokenIn == token1); // ensures to prevent counterfeit event parameters.
+            //require(_tokenIn == token1);
             _tokenOut = token0;
-            // Cannot underflow because reserve will never be larger than balance.
-            unchecked {
-                _amountIn = _balance1 - reserve1;
-            }
+            _amountIn = _balance1 - reserve1;
             _amountOut = _getAmountOut(_amountIn, _reserve0, _reserve1, false);
             _balance0 -= _amountOut;
 
-            emit Swap(msg.sender, 0, _amountIn, _amountOut, 0, _to); // emit here to avoid checking direction 
+            emit Swap(msg.sender, 0, _amountIn, _amountOut, 0, _to);
+        }
+
+        // Checks overflow.
+        if (_balance0 > type(uint128).max) {
+            revert Overflow();
+        }
+        if (_balance1 > type(uint128).max) {
+            revert Overflow();
         }
 
         // Transfers output tokens.
@@ -292,9 +296,8 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, ReentrancyGuard {
         }
     }
 
-    function _mintProtocolFee(uint _reserve0, uint _reserve1) private returns (bool _feeOn, uint _totalSupply, uint _invariant) {
+    function _mintProtocolFee(uint _reserve0, uint _reserve1, uint _invariant) private returns (bool _feeOn, uint _totalSupply) {
         _totalSupply = totalSupply;
-        _invariant = _computeInvariant(_reserve0, _reserve1);
 
         address _feeRecipient = IPoolMaster(master).feeRecipient();
         _feeOn = (_feeRecipient != address(0));
@@ -302,6 +305,10 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, ReentrancyGuard {
         uint _invariantLast = invariantLast;
         if (_invariantLast != 0) {
             if (_feeOn) {
+                if (_invariant == 0) {
+                    _invariant = _computeInvariant(_reserve0, _reserve1);
+                }
+
                 if (_invariant > _invariantLast) {
                     /// @dev Mints `protocolFee` % of growth in liquidity (invariant).
                     uint _protocolFee = getProtocolFee();
@@ -371,6 +378,12 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, ReentrancyGuard {
     }
 
     function _computeInvariant(uint _reserve0, uint _reserve1) private pure returns (uint _invariant) {
+        if (_reserve0 > type(uint128).max) {
+            revert Overflow();
+        }
+        if (_reserve1 > type(uint128).max) {
+            revert Overflow();
+        }
         _invariant = (_reserve0 * _reserve1).sqrt();
     }
 }

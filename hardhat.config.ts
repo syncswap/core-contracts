@@ -1,4 +1,5 @@
 import "@matterlabs/hardhat-zksync-deploy";
+import "@matterlabs/hardhat-zksync-verify";
 import "@matterlabs/hardhat-zksync-solc";
 import "@nomiclabs/hardhat-waffle";
 import "@nomiclabs/hardhat-solhint";

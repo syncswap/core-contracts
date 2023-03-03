@@ -54,7 +54,7 @@ library TransferHelper {
 
     function safeTransferETH(address to, uint value) internal {
         // solhint-disable-next-line avoid-low-level-calls
-        (bool success, ) = to.call{value: value}(new bytes(0));
+        (bool success, ) = to.call{value: value}("");
 
         if (!success) {
             revert SafeTransferETHFailed();

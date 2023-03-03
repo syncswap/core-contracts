@@ -18,7 +18,7 @@
     "@matterlabs/hardhat-zksync-deploy": "^0.6.2",
     "@matterlabs/hardhat-zksync-solc": "^0.3.14",
     "@matterlabs/hardhat-zksync-toolbox": "^0.1.0",
-    "@matterlabs/hardhat-zksync-verify": "^0.1.1",
+    "@matterlabs/hardhat-zksync-verify": "^0.1.2",
     "@matterlabs/hardhat-zksync-vyper": "^0.1.7",
     "@nomicfoundation/hardhat-chai-matchers": "^1.0.6",
     "@nomiclabs/hardhat-ethers": "^2.2.2",

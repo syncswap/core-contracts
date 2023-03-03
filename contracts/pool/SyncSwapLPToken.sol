@@ -4,6 +4,7 @@ pragma solidity ^0.8.0;
 
 import "../libraries/SignatureChecker.sol";
 
+import "../interfaces/token/IERC165.sol";
 import "../interfaces/token/IERC20Permit2.sol";
 
 error Expired();
@@ -16,7 +17,7 @@ error InvalidSignature();
  * Based on Solmate's ERC20.
  * https://github.com/transmissions11/solmate/blob/bff24e835192470ed38bf15dbed6084c2d723ace/src/tokens/ERC20.sol
  */
-contract SyncSwapLPToken is IERC20Permit2 {
+contract SyncSwapLPToken is IERC165, IERC20Permit2 {
     string public override name;
     string public override symbol;
     uint8 public immutable override decimals = 18;
@@ -24,26 +25,35 @@ contract SyncSwapLPToken is IERC20Permit2 {
     uint public override totalSupply;
     mapping(address => uint) public override balanceOf;
     mapping(address => mapping(address => uint)) public override allowance;
-    
-    bytes32 private immutable domainSeparator;
+
     bytes32 private constant PERMIT_TYPEHASH = 0x6e71edae12b1b97f4d1f60370fef10105fa2faae0126114a169c64845d6126c9; // keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)")
     mapping(address => uint) public override nonces;
 
     constructor() {
-        domainSeparator = keccak256(
-            abi.encode(
-                0x8b73c3c69bb8fe3d512ecc4cf759cc79239f7b179b0ffacaa9a75d522b39400f, // keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")
-                0x125767caed758c30726816e62c5b217c6b2b9320c3afbe187788f2fe0d76e810, // keccak256(bytes("SyncSwap LP Token"))
-                0xc89efdaa54c0f20c7adf612882df0950f5a951637e0307cdcb4c672f298b8bc6, // keccak256(bytes("1"))
-                block.chainid,
-                address(this)
-            )
-        );
     }
 
     function _initializeMetadata(string memory _name, string memory _symbol) internal {
         name = _name;
         symbol = _symbol;
+    }
+
+    function supportsInterface(bytes4 interfaceID) external pure override returns (bool) {
+        return
+            interfaceID == this.supportsInterface.selector || // ERC-165
+            interfaceID == this.permit.selector || // ERC-2612
+            interfaceID == this.permit2.selector; // Permit2
+    }
+
+    function DOMAIN_SEPARATOR() public view override returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                0x8b73c3c69bb8fe3d512ecc4cf759cc79239f7b179b0ffacaa9a75d522b39400f, // keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")
+                keccak256(bytes(name)),
+                0xc89efdaa54c0f20c7adf612882df0950f5a951637e0307cdcb4c672f298b8bc6, // keccak256(bytes("1"))
+                block.chainid,
+                address(this)
+            )
+        );
     }
 
     function _approve(address _owner, address _spender, uint _amount) private {
@@ -123,7 +133,7 @@ contract SyncSwapLPToken is IERC20Permit2 {
         return keccak256(
             abi.encodePacked(
                 "\x19\x01",
-                domainSeparator,
+                DOMAIN_SEPARATOR(),
                 keccak256(abi.encode(PERMIT_TYPEHASH, _owner, _spender, _amount, nonces[_owner]++, _deadline))
             )
         );
@@ -141,7 +151,10 @@ contract SyncSwapLPToken is IERC20Permit2 {
         bytes32 _hash = _permitHash(_owner, _spender, _amount, _deadline);
         address _recoveredAddress = ecrecover(_hash, _v, _r, _s);
 
-        if (_recoveredAddress == address(0) || _recoveredAddress != _owner) {
+        if (_recoveredAddress != _owner) {
+            revert InvalidSignature();
+        }
+        if (_recoveredAddress == address(0)) {
             revert InvalidSignature();
         }
 

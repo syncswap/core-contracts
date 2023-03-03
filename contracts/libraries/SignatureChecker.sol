@@ -29,8 +29,10 @@ library SignatureChecker {
         bytes memory signature
     ) internal view returns (bool) {
         (address recovered) = ECDSA.recover(hash, signature);
-        if (recovered != address(0) && recovered == signer) {
-            return true;
+        if (recovered == signer) {
+            if (recovered != address(0)) {
+                return true;
+            }
         }
 
         (bool success, bytes memory result) = signer.staticcall(
