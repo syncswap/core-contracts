@@ -75,12 +75,13 @@ export async function classicPoolFixture(
 ): Promise<PoolFixture> {
     const weth = await deployWETH9();
     const vault = await deployVault(weth.address);
+
     const [master, feeManager] = await deployPoolMaster(vault.address, feeRecipient);
     feeManager.setDefaultSwapFee(1, 300); // Set fee to 0.3% for testing
     const factory = await deployClassicPoolFactory(master);
 
-    const tokenA = deflating0 ? await deployDeflatingERC20(MAX_UINT256) : await deploySyncSwapLPToken(MAX_UINT256);
-    const tokenB = deflating1 ? await deployDeflatingERC20(MAX_UINT256) : await deploySyncSwapLPToken(MAX_UINT256);
+    const tokenA = deflating0 ? await deployDeflatingERC20(MAX_UINT256) : await deployTestERC20(MAX_UINT256, 18);
+    const tokenB = deflating1 ? await deployDeflatingERC20(MAX_UINT256) : await deployTestERC20(MAX_UINT256, 18);
     const data = defaultAbiCoder.encode(
         ["address", "address"], [tokenA.address, tokenB.address]
     );
@@ -101,12 +102,13 @@ export async function stablePoolFixture(
 ): Promise<PoolFixture> {
     const weth = await deployWETH9();
     const vault = await deployVault(weth.address);
+
     const [master, feeManager] = await deployPoolMaster(vault.address, feeRecipient);
     feeManager.setDefaultSwapFee(2, 100); // Set fee to 0.1% for testing
     const factory = await deployStablePoolFactory(master);
 
-    const tokenA = await deploySyncSwapLPToken(MAX_UINT256);
-    const tokenB = await deploySyncSwapLPToken(MAX_UINT256);
+    const tokenA = await deployTestERC20(MAX_UINT256, 18);
+    const tokenB = await deployTestERC20(MAX_UINT256, 18);
     const data = defaultAbiCoder.encode(
         ["address", "address"], [tokenA.address, tokenB.address]
     );
@@ -133,9 +135,9 @@ interface V2Fixture {
     WETHPair: Contract;
 }
 
-export async function deployTestERC20(totalSupply: BigNumber): Promise<Contract> {
+export async function deployTestERC20(totalSupply: BigNumber, decimals: number): Promise<Contract> {
     const contractFactory = await ethers.getContractFactory('TestERC20');
-    const contract = await contractFactory.deploy(totalSupply);
+    const contract = await contractFactory.deploy(totalSupply, decimals);
     await contract.deployed();
     return contract;
 }
@@ -168,15 +170,15 @@ export async function deployRouterEventEmitter(factory: string, WETH: string): P
     return contract;
 }
 
-export async function v2Fixture(): Promise<V2Fixture> {
+export async function routerFixture(): Promise<V2Fixture> {
     const accounts = await ethers.getSigners()
     const wallet = accounts[0];
 
     // deploy tokens
-    const tokenA = await deployTestERC20(expandTo18Decimals(10000));
-    const tokenB = await deployTestERC20(expandTo18Decimals(10000));
+    const tokenA = await deployTestERC20(expandTo18Decimals(10000), 18);
+    const tokenB = await deployTestERC20(expandTo18Decimals(10000), 18);
     const WETH = await deployWETH9();
-    const WETHPartner = await deployTestERC20(expandTo18Decimals(10000));
+    const WETHPartner = await deployTestERC20(expandTo18Decimals(10000), 18);
 
     // deploy core
     const vault = await deployVault(WETH.address);

@@ -69,12 +69,12 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, ReentrancyGuard {
         (bool _success0, string memory _symbol0) = MetadataHelper.getSymbol(_token0);
         (bool _success1, string memory _symbol1) = MetadataHelper.getSymbol(_token1);
         if (_success0 && _success1) {
-            _initializeMetadata(
+            _initialize(
                 string(abi.encodePacked("SyncSwap ", _symbol0, "/", _symbol1, " Stable LP")),
                 string(abi.encodePacked(_symbol0, "/", _symbol1, " sSLP"))
             );
         } else {
-            _initializeMetadata(
+            _initialize(
                 "SyncSwap Stable LP",
                 "sSLP"
             );

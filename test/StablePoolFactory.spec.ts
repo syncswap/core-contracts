@@ -18,8 +18,8 @@ describe('SyncSwapStablePoolFactory', () => {
   before(async () => {
     wallets = await ethers.getSigners();
 
-    const tokenA = await deployTestERC20(expandTo18Decimals(10000));
-    const tokenB = await deployTestERC20(expandTo18Decimals(10000));
+    const tokenA = await deployTestERC20(expandTo18Decimals(10000), 18);
+    const tokenB = await deployTestERC20(expandTo18Decimals(10000), 18);
     testTokens = [tokenA.address, tokenB.address];
   });
 
@@ -44,7 +44,7 @@ describe('SyncSwapStablePoolFactory', () => {
 
   async function createStablePool(tokenA: string, tokenB: string) {
     const [token0, token1]: [string, string] = (
-      Number(tokenA) < Number(tokenB) ? [tokenA, tokenB] : [tokenB, tokenA]
+      tokenA < tokenB ? [tokenA, tokenB] : [tokenB, tokenA]
     );
 
     const data = defaultAbiCoder.encode(
@@ -86,7 +86,7 @@ describe('SyncSwapStablePoolFactory', () => {
     );
     const tx = await master.createPool(factory.address, data);
     const receipt = await tx.wait();
-    expect(receipt.gasUsed).to.eq(2871136); // 2512920 for Uniswap V2
+    expect(receipt.gasUsed).to.eq(2925338); // 2512920 for Uniswap V2
   });
 
   /*

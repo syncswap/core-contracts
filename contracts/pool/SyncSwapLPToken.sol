@@ -18,8 +18,6 @@ error InvalidSignature();
  * https://github.com/transmissions11/solmate/blob/bff24e835192470ed38bf15dbed6084c2d723ace/src/tokens/ERC20.sol
  */
 contract SyncSwapLPToken is IERC165, IERC20Permit2 {
-    string public override name;
-    string public override symbol;
     uint8 public immutable override decimals = 18;
 
     uint public override totalSupply;
@@ -29,12 +27,19 @@ contract SyncSwapLPToken is IERC165, IERC20Permit2 {
     bytes32 private constant PERMIT_TYPEHASH = 0x6e71edae12b1b97f4d1f60370fef10105fa2faae0126114a169c64845d6126c9; // keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)")
     mapping(address => uint) public override nonces;
 
-    constructor() {
-    }
+    // These members are actually immutable as
+    // `_initialize` will only indent to be called once.
+    string public override name;
+    string public override symbol;
+    uint private INITIAL_CHAIN_ID;
+    bytes32 private INITIAL_DOMAIN_SEPARATOR;
 
-    function _initializeMetadata(string memory _name, string memory _symbol) internal {
+    function _initialize(string memory _name, string memory _symbol) internal {
         name = _name;
         symbol = _symbol;
+
+        INITIAL_CHAIN_ID = block.chainid;
+        INITIAL_DOMAIN_SEPARATOR = _computeDomainSeparator();
     }
 
     function supportsInterface(bytes4 interfaceID) external pure override returns (bool) {
@@ -45,11 +50,17 @@ contract SyncSwapLPToken is IERC165, IERC20Permit2 {
     }
 
     function DOMAIN_SEPARATOR() public view override returns (bytes32) {
+        return block.chainid == INITIAL_CHAIN_ID ? INITIAL_DOMAIN_SEPARATOR : _computeDomainSeparator();
+    }
+
+    function _computeDomainSeparator() private view returns (bytes32) {
         return keccak256(
             abi.encode(
-                0x8b73c3c69bb8fe3d512ecc4cf759cc79239f7b179b0ffacaa9a75d522b39400f, // keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")
+                // keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")
+                0x8b73c3c69bb8fe3d512ecc4cf759cc79239f7b179b0ffacaa9a75d522b39400f,
                 keccak256(bytes(name)),
-                0xc89efdaa54c0f20c7adf612882df0950f5a951637e0307cdcb4c672f298b8bc6, // keccak256(bytes("1"))
+                // keccak256(bytes("1"))
+                0xc89efdaa54c0f20c7adf612882df0950f5a951637e0307cdcb4c672f298b8bc6,
                 block.chainid,
                 address(this)
             )
