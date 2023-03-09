@@ -92,7 +92,7 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
             }
         }
 
-        liquidity = IPool(pool).mint(data);
+        liquidity = IPool(pool).mint(data, msg.sender);
 
         if (liquidity < minLiquidity) {
             revert NotEnoughLiquidityMinted();
@@ -222,7 +222,7 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
     ) private returns (uint amountOut) {
         IBasePool(pool).transferFrom(msg.sender, pool, liquidity);
 
-        amountOut = IPool(pool).burnSingle(data);
+        amountOut = IPool(pool).burnSingle(data, msg.sender);
 
         if (amountOut < minAmount) {
             revert TooLittleReceived();
@@ -292,11 +292,11 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
             for (j = 0; j < stepsLength; ) {
                 if (j == stepsLength - 1) {
                     // Accumulate output amount at the last step.
-                    amountOut += IBasePool(step.pool).swap(step.data);
+                    amountOut += IBasePool(step.pool).swap(step.data, msg.sender);
                     break;
                 } else {
                     // Swap and send tokens to the next step.
-                    IBasePool(step.pool).swap(step.data);
+                    IBasePool(step.pool).swap(step.data, msg.sender);
 
                     // Cache the next step.
                     step = path.steps[j + 1];

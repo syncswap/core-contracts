@@ -47,7 +47,7 @@ function encodeAddress(address: string): string {
 
 async function mint() {
   const data = encodeAddress(wallet.address);
-  return pool.mint(data);
+  return pool.mint(data, wallet.address);
 }
 
 async function burn() {
@@ -61,7 +61,7 @@ async function burnSingle(tokenOut: string) {
   const data = defaultAbiCoder.encode(
     ["address", "address", "uint8"], [tokenOut, wallet.address, 1] // 1 = UNWRAPPED
   );
-  return pool.burnSingle(data);
+  return pool.burnSingle(data, wallet.address);
 }
 
 //pool.swap(token0.address, wallet.address)
@@ -70,7 +70,7 @@ async function swap(tokenIn: string) {
   const data = defaultAbiCoder.encode(
     ["address", "address", "uint8"], [tokenIn, wallet.address, 1] // 1 = UNWRAPPED
   );
-  return pool.swap(data);
+  return pool.swap(data, wallet.address);
 }
 
 async function tryMint(
@@ -93,6 +93,7 @@ async function tryMint(
   expect(await balanceOf(token1, pool)).to.eq(token1Amount.add(poolBalance1Before));
 
   const calculated = await calculateLiquidityToMint(
+    wallet.address,
     vault,
     pool,
     token0Amount,
@@ -204,7 +205,7 @@ async function tryBurnSingle(
   const token0AmountBalanced = calculatePoolTokens(liquidity, poolBalance0, totalSupply);
   const token1AmountBalanced = calculatePoolTokens(liquidity, poolBalance1, totalSupply);
 
-  const swapFee = await getSwapFee(pool);
+  const swapFee = await getSwapFee(pool, wallet.address);
   const token0Amount = (
     tokenOut == token0.address ?
       token0AmountBalanced.add(getAmountOut({
@@ -290,7 +291,7 @@ async function trySwap(
     amountIn: amountIn,
     reserveIn: reserveIn,
     reserveOut: reserveOut,
-    swapFee: await getSwapFee(pool),
+    swapFee: await getSwapFee(pool, wallet.address),
     A: POOL_A,
     tokenInPrecisionMultiplier: tokenInPrecisionMultiplier,
     tokenOutPrecisionMultiplier: tokenOutPrecisionMultiplier

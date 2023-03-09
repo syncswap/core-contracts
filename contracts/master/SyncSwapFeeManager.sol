@@ -3,7 +3,7 @@
 pragma solidity ^0.8.0;
 
 import "../interfaces/pool/IPool.sol";
-import "../interfaces/IFeeManager.sol";
+import "../interfaces/master/IFeeManager.sol";
 
 import "../libraries/Ownable.sol";
 
@@ -13,75 +13,111 @@ import "../libraries/Ownable.sol";
 contract SyncSwapFeeManager is IFeeManager, Ownable {
     uint24 private constant MAX_PROTOCOL_FEE = 1e5; /// @dev 100%.
     uint24 private constant MAX_SWAP_FEE = 10000; /// @dev 10%.
-    uint24 private constant ZERO_CUSTOM_SWAP_FEE = type(uint24).max;
+    uint24 private constant ZERO_CUSTOM_FEE = type(uint24).max;
 
     /// @dev The default swap fee by pool type.
-    mapping(uint16 => uint24) public override defaultSwapFee; /// @dev `300` for 0.3%.
+    mapping(uint16 => uint24) public defaultSwapFee; /// @dev `300` for 0.3%.
 
-    /// @dev The custom swap fee by pool address, use `ZERO_CUSTOM_SWAP_FEE` for zero fee.
-    mapping(address => uint24) public override customSwapFee;
-
-    /// @dev The recipient of protocol fees.
-    address public override feeRecipient;
+    /// @dev The custom swap fee by pool address, use `ZERO_CUSTOM_FEE` for zero fee.
+    mapping(address => uint24) public poolSwapFee;
 
     /// @dev The protocol fee of swap fee by pool type.
-    mapping(uint16 => uint24) public override protocolFee; /// @dev `30000` for 30%.
+    mapping(uint16 => uint24) public defaultProtocolFee; /// @dev `30000` for 30%.
+
+    /// @dev The custom protocol fee by pool address, use `ZERO_CUSTOM_FEE` for zero fee.
+    mapping(address => uint24) public poolProtocolFee;
+
+    /// @dev The recipient of protocol fees.
+    address public feeRecipient;
 
     // Events
-    event SetDefaultSwapFee(uint16 indexed poolType, uint24 defaultSwapFee);
-    event SetCustomSwapFee(address indexed pool, uint24 customSwapFee);
-    event SetProtocolFee(uint16 indexed poolType, uint24 protocolFee);
+    event SetDefaultSwapFee(uint16 indexed poolType, uint24 fee);
+    event SetPoolSwapFee(address indexed pool, uint24 fee);
+    event SetDefaultProtocolFee(uint16 indexed poolType, uint24 fee);
+    event SetPoolProtocolFee(address indexed pool, uint24 fee);
     event SetFeeRecipient(address indexed previousFeeRecipient, address indexed newFeeRecipient);
 
     constructor(address _feeRecipient) {
         feeRecipient = _feeRecipient;
 
         // Prefill fees for known pool types.
-        // Classic pools.
-        defaultSwapFee[1] = 100; // 0.1%.
-        protocolFee[1] = 30000; // 30%.
+        // 1 Classic Pools
+        defaultSwapFee[1] = 200; // 0.2%.
+        defaultProtocolFee[1] = 50000; // 50%.
 
-        // Stable pools.
-        defaultSwapFee[2] = 50; // 0.05%.
-        protocolFee[2] = 50000; // 50%.
+        // 2 Stable Pools
+        defaultSwapFee[2] = 40; // 0.04%.
+        defaultProtocolFee[2] = 50000; // 50%.
     }
 
-    function getSwapFee(address pool) external view override returns (uint24 swapFee) {
-        uint24 _customSwapFee = customSwapFee[pool];
+    // Getters
 
-        if (_customSwapFee == 0) {
-            swapFee = defaultSwapFee[IPool(pool).poolType()]; // use default instead if not set.
+    function getSwapFee(address pool, address /*sender*/) external view override returns (uint24 fee) {
+        fee = poolSwapFee[pool];
+
+        if (fee == 0) {
+            // not set, use default fee of the pool type.
+            fee = defaultSwapFee[IPool(pool).poolType()];
         } else {
-            swapFee = (_customSwapFee == ZERO_CUSTOM_SWAP_FEE ? 0 : _customSwapFee);
+            // has a pool swap fee.
+            fee = (fee == ZERO_CUSTOM_FEE ? 0 : fee);
         }
     }
 
-    function setDefaultSwapFee(uint16 poolType, uint24 _defaultSwapFee) external onlyOwner {
-        require(
-            _defaultSwapFee <= MAX_SWAP_FEE,
-            "INVALID_FEE"
-        );
-        defaultSwapFee[poolType] = _defaultSwapFee;
-        emit SetDefaultSwapFee(poolType, _defaultSwapFee);
+    function getProtocolFee(address pool) external view override returns (uint24 fee) {
+        fee = poolProtocolFee[pool];
+
+        if (fee == 0) {
+            // not set, use default fee of the pool type.
+            fee = defaultProtocolFee[IPool(pool).poolType()];
+        } else {
+            // has a pool protocol fee.
+            fee = (fee == ZERO_CUSTOM_FEE ? 0 : fee);
+        }
     }
 
-    function setCustomSwapFee(address pool, uint24 _customSwapFee) external onlyOwner {
-        require(
-            _customSwapFee == ZERO_CUSTOM_SWAP_FEE ||
-            _customSwapFee <= MAX_SWAP_FEE,
-            "INVALID_FEE"
-        );
-        customSwapFee[pool] = _customSwapFee;
-        emit SetCustomSwapFee(pool, _customSwapFee);
+    function getFeeRecipient() external view override returns (address) {
+        return feeRecipient;
     }
 
-    function setProtocolFee(uint16 poolType, uint24 _protocolFee) external onlyOwner {
+    // Setters
+
+    function setDefaultSwapFee(uint16 poolType, uint24 fee) external onlyOwner {
         require(
-            _protocolFee <= MAX_PROTOCOL_FEE,
+            fee <= MAX_SWAP_FEE,
             "INVALID_FEE"
         );
-        protocolFee[poolType] = _protocolFee;
-        emit SetProtocolFee(poolType, _protocolFee);
+        defaultSwapFee[poolType] = fee;
+        emit SetDefaultSwapFee(poolType, fee);
+    }
+
+    function setPoolSwapFee(address pool, uint24 fee) external onlyOwner {
+        require(
+            fee == ZERO_CUSTOM_FEE ||
+            fee <= MAX_SWAP_FEE,
+            "INVALID_FEE"
+        );
+        poolSwapFee[pool] = fee;
+        emit SetPoolSwapFee(pool, fee);
+    }
+
+    function setDefaultProtocolFee(uint16 poolType, uint24 fee) external onlyOwner {
+        require(
+            fee <= MAX_PROTOCOL_FEE,
+            "INVALID_FEE"
+        );
+        defaultProtocolFee[poolType] = fee;
+        emit SetDefaultProtocolFee(poolType, fee);
+    }
+
+    function setPoolProtocolFee(address pool, uint24 fee) external onlyOwner {
+        require(
+            fee == ZERO_CUSTOM_FEE ||
+            fee <= MAX_PROTOCOL_FEE,
+            "INVALID_FEE"
+        );
+        poolProtocolFee[pool] = fee;
+        emit SetPoolProtocolFee(pool, fee);
     }
 
     function setFeeRecipient(address _feeRecipient) external onlyOwner {

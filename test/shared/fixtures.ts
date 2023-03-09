@@ -15,6 +15,13 @@ export async function deployVault(weth: string): Promise<Contract> {
     return contract;
 }
 
+export async function deployForwarderRegistry(): Promise<Contract> {
+    const contractFactory = await ethers.getContractFactory('ForwarderRegistry');
+    const contract = await contractFactory.deploy();
+    await contract.deployed();
+    return contract;
+}
+
 export async function deployFeeManager(feeRecipient: string): Promise<Contract> {
     const contractFactory = await ethers.getContractFactory('SyncSwapFeeManager');
     const contract = await contractFactory.deploy(feeRecipient);
@@ -23,9 +30,10 @@ export async function deployFeeManager(feeRecipient: string): Promise<Contract> 
 }
 
 export async function deployPoolMaster(vault: string, feeRecipient: string): Promise<[Contract, Contract]> {
+    const forwarderRegistry = await deployForwarderRegistry();
     const feeManager = await deployFeeManager(feeRecipient);
     const contractFactory = await ethers.getContractFactory('SyncSwapPoolMaster');
-    const contract = await contractFactory.deploy(vault, feeManager.address);
+    const contract = await contractFactory.deploy(vault, forwarderRegistry.address, feeManager.address);
     await contract.deployed();
     return [contract, feeManager];
 }

@@ -86,7 +86,7 @@ describe('SyncSwapStablePoolFactory', () => {
     );
     const tx = await master.createPool(factory.address, data);
     const receipt = await tx.wait();
-    expect(receipt.gasUsed).to.eq(2925338); // 2512920 for Uniswap V2
+    expect(receipt.gasUsed).to.eq(3081919); // 2512920 for Uniswap V2
   });
 
   /*
@@ -103,7 +103,7 @@ describe('SyncSwapStablePoolFactory', () => {
 
   it('Should set a new protocol fee', async () => {
     // Expect current protocol fee.
-    expect(await factory.protocolFee()).to.eq(50000);
+    expect(await factory.getProtocolFee()).to.eq(50000);
 
     // Set protocol fee using wrong account.
     await expect(factory.connect(wallets[1]).setProtocolFee(30000)).to.be.reverted;
@@ -112,7 +112,7 @@ describe('SyncSwapStablePoolFactory', () => {
     await factory.setProtocolFee(30000);
 
     // Expect new protocol fee.
-    expect(await factory.protocolFee()).to.eq(30000);
+    expect(await factory.getProtocolFee()).to.eq(30000);
   });
   */
 });

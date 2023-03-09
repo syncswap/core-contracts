@@ -2,7 +2,7 @@
 
 pragma solidity ^0.8.0;
 
-import "../interfaces/IPoolMaster.sol";
+import "../interfaces/master/IPoolMaster.sol";
 import "../interfaces/factory/IPoolFactory.sol";
 
 import "../libraries/Ownable2Step.sol";
@@ -24,6 +24,11 @@ contract SyncSwapPoolMaster is IPoolMaster, Ownable2Step {
     /// @dev The vault that holds funds.
     address public immutable override vault;
 
+    // Forwarder Registry
+
+    /// @dev The registry of forwarder.
+    address public forwarderRegistry;
+
     // Fees
 
     /// @dev The fee manager.
@@ -42,31 +47,41 @@ contract SyncSwapPoolMaster is IPoolMaster, Ownable2Step {
     /// @dev Pools by hash of its config.
     mapping(bytes32 => address) public override getPool;
 
-    constructor(address _vault, address _feeManager) {
+    address[] public pools;
+
+    constructor(address _vault, address _forwarderRegistry, address _feeManager) {
         vault = _vault;
+        forwarderRegistry = _forwarderRegistry;
         feeManager = _feeManager;
+    }
+
+    function poolsLength() external view override returns (uint) {
+        return pools.length;
+    }
+
+    // Forwarder Registry
+
+    function isForwarder(address forwarder) external view override returns (bool) {
+        return IForwarderRegistry(forwarderRegistry).isForwarder(forwarder);
+    }
+
+    function setForwarderRegistry(address newForwarderRegistry) external override onlyOwner {
+        emit UpdateForwarderRegistry(forwarderRegistry, newForwarderRegistry);
+        forwarderRegistry = newForwarderRegistry;
     }
 
     // Fees
 
-    function defaultSwapFee(uint16 poolType) external view override returns (uint24 fee) {
-        fee = IFeeManager(feeManager).defaultSwapFee(poolType);
+    function getSwapFee(address pool, address sender) external view override returns (uint24 fee) {
+        fee = IFeeManager(feeManager).getSwapFee(pool, sender);
     }
 
-    function customSwapFee(address pool) external view override returns (uint24 fee) {
-        fee = IFeeManager(feeManager).customSwapFee(pool);
+    function getProtocolFee(address pool) external view override returns (uint24 fee) {
+        fee = IFeeManager(feeManager).getProtocolFee(pool);
     }
 
-    function feeRecipient() external view override returns (address recipient) {
-        recipient = IFeeManager(feeManager).feeRecipient();
-    }
-
-    function protocolFee(uint16 poolType) external view override returns (uint24 fee) {
-        fee = IFeeManager(feeManager).protocolFee(poolType);
-    }
-
-    function getSwapFee(address pool) external view override returns (uint24 fee) {
-        fee = IFeeManager(feeManager).getSwapFee(pool);
+    function getFeeRecipient() external view override returns (address recipient) {
+        recipient = IFeeManager(feeManager).getFeeRecipient();
     }
 
     function setFeeManager(address newFeeManager) external override onlyOwner {
@@ -114,6 +129,7 @@ contract SyncSwapPoolMaster is IPoolMaster, Ownable2Step {
         // Set to mappings.
         getPool[hash] = pool;
         isPool[pool] = true;
+        pools.push(pool);
 
         emit RegisterPool(msg.sender, pool, poolType, data);
     }

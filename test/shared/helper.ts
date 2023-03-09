@@ -111,7 +111,7 @@ async function calculateMintProtocolFee(
   const invariant = await computeInvariant(pool, reserve0, reserve1);
 
   const master = await getPoolMaster(await pool.master());
-  const feeTo = await master.feeRecipient();
+  const feeTo = await master.getFeeRecipient();
 
   if (feeTo == ZERO_ADDRESS) {
     return {
@@ -124,7 +124,7 @@ async function calculateMintProtocolFee(
   const lastInvariant = await pool.invariantLast();
   if (!lastInvariant.isZero()) {
     if (invariant.gt(lastInvariant)) {
-      const protocolFee = BigNumber.from(await master.protocolFee(await pool.poolType()));
+      const protocolFee = BigNumber.from(await master.getProtocolFee(pool.address));
       const numerator = totalSupply.mul(invariant.sub(lastInvariant)).mul(protocolFee);
       const denominator = MAX_FEE.sub(protocolFee).mul(invariant).add(protocolFee.mul(lastInvariant));
       const liquidity = numerator.div(denominator);
@@ -158,12 +158,13 @@ async function getToken(tokenAddress: string): Promise<Contract> {
   return new Contract(tokenAddress, tokenArtifact.abi, hre.ethers.provider);
 }
 
-export async function getSwapFee(pool: Contract): Promise<BigNumber> {
+export async function getSwapFee(pool: Contract, sender: string): Promise<BigNumber> {
   const master = await getPoolMaster(await pool.master());
-  return BigNumber.from(await master.getSwapFee(pool.address));
+  return BigNumber.from(await master.getSwapFee(pool.address, sender));
 }
 
 export async function calculateLiquidityToMint(
+  sender: string,
   vault: Contract,
   pool: Contract,
   amount0In: BigNumber,
@@ -183,7 +184,7 @@ export async function calculateLiquidityToMint(
   const balance1 = await vault.balanceOf(token1.address, pool.address);
 
   const newInvariant = await computeInvariant(pool, balance0, balance1);
-  const swapFee = await getSwapFee(pool);
+  const swapFee = await getSwapFee(pool, sender);
 
   const [fee0, fee1] = unbalancedMintFee(swapFee, reserve0, reserve1, amount0In, amount1In);
 

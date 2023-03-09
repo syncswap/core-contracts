@@ -2,8 +2,8 @@
 
 pragma solidity ^0.8.0;
 
-import "../../interfaces/IPoolMaster.sol";
 import "../../interfaces/token/IERC20.sol";
+import "../../interfaces/master/IPoolMaster.sol";
 
 import "../BasePoolFactory.sol";
 

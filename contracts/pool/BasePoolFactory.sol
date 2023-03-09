@@ -3,7 +3,7 @@
 pragma solidity ^0.8.0;
 
 import "../interfaces/factory/IBasePoolFactory.sol";
-import "../interfaces/IPoolMaster.sol";
+import "../interfaces/master/IPoolMaster.sol";
 
 error InvalidTokens();
 
@@ -24,8 +24,8 @@ abstract contract BasePoolFactory is IBasePoolFactory {
         deployData = cachedDeployData;
     }
 
-    function getSwapFee(address pool) external view override returns (uint24 swapFee) {
-        swapFee = IPoolMaster(master).getSwapFee(pool);
+    function getSwapFee(address pool, address sender) external view override returns (uint24 swapFee) {
+        swapFee = IPoolMaster(master).getSwapFee(pool, sender);
     }
 
     function createPool(bytes calldata data) external override returns (address pool) {

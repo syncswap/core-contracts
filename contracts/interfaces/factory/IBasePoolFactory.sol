@@ -13,5 +13,5 @@ interface IBasePoolFactory is IPoolFactory {
 
     function getPool(address tokenA, address tokenB) external view returns (address pool);
 
-    function getSwapFee(address pool) external view returns (uint24 swapFee);
+    function getSwapFee(address pool, address sender) external view returns (uint24 swapFee);
 }

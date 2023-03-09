@@ -6,8 +6,8 @@ import "../../libraries/ReentrancyGuard.sol";
 import "../../libraries/Math.sol";
 import "../../libraries/MetadataHelper.sol";
 
-import "../../interfaces/IPoolMaster.sol";
 import "../../interfaces/vault/IVault.sol";
+import "../../interfaces/master/IPoolMaster.sol";
 import "../../interfaces/factory/IPoolFactory.sol";
 import "../../interfaces/pool/IClassicPool.sol";
 
@@ -75,7 +75,7 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, ReentrancyGuard {
 
     /// @dev Mints LP tokens - should be called via the router after transferring pool tokens.
     /// The router should ensure that sufficient LP tokens are minted.
-    function mint(bytes calldata _data) external override nonReentrant returns (uint _liquidity) {
+    function mint(bytes calldata _data, address _sender) external override nonReentrant returns (uint _liquidity) {
         address _to = abi.decode(_data, (address));
         (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
         (uint _balance0, uint _balance1) = _balances();
@@ -83,11 +83,11 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, ReentrancyGuard {
         uint _newInvariant = _computeInvariant(_balance0, _balance1);
         uint _amount0 = _balance0 - _reserve0;
         uint _amount1 = _balance1 - _reserve1;
-        //require(_amount0 != 0 && _amount1 != 0); // unchecked to save gas as not necessary
+        //require(_amount0 != 0 && _amount1 != 0);
 
         {
         // Adds mint fee to reserves (applies to invariant increase) if unbalanced.
-        (uint _fee0, uint _fee1) = _unbalancedMintFee(_amount0, _amount1, _reserve0, _reserve1);
+        (uint _fee0, uint _fee1) = _unbalancedMintFee(_getSwapFee(_sender), _amount0, _amount1, _reserve0, _reserve1);
         _reserve0 += _fee0;
         _reserve1 += _fee1;
         }
@@ -133,14 +133,14 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, ReentrancyGuard {
         // Calculates amounts of pool tokens proportional to balances.
         uint _amount0 = _liquidity * _balance0 / _totalSupply;
         uint _amount1 = _liquidity * _balance1 / _totalSupply;
-        //require(_amount0 != 0 || _amount1 != 0); // unchecked to save gas, should be done through router.
+        //require(_amount0 != 0 || _amount1 != 0);
 
         // Burns liquidity and transfers pool tokens.
         _burn(address(this), _liquidity);
         _transferTokens(token0, _to, _amount0, _withdrawMode);
         _transferTokens(token1, _to, _amount1, _withdrawMode);
 
-        // Update reserves and last invariant with up-to-date balances (after transfers).
+        // Updates reserves and last invariant with up-to-date balances (after transfers).
         /// @dev Using counterfactuals balances here to save gas.
         /// Cannot underflow because amounts are lesser figures derived from balances.
         unchecked {
@@ -163,7 +163,7 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, ReentrancyGuard {
     /// @dev Burns LP tokens sent to this contract and swaps one of the output tokens for another
     /// - i.e., the user gets a single token out by burning LP tokens.
     /// The router should ensure that sufficient pool tokens are received.
-    function burnSingle(bytes calldata _data) external override nonReentrant returns (uint _amountOut) {
+    function burnSingle(bytes calldata _data, address _sender) external override nonReentrant returns (uint _amountOut) {
         (address _tokenOut, address _to, uint8 _withdrawMode) = abi.decode(_data, (address, address, uint8));
         (uint _balance0, uint _balance1) = _balances();
         uint _liquidity = balanceOf[address(this)];
@@ -178,26 +178,29 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, ReentrancyGuard {
         // Burns liquidity.
         _burn(address(this), _liquidity);
 
-        // Swap one token for another, transfers desired tokens, and update context values.
+        // Gets swap fee for the sender.
+        uint _swapFee = _getSwapFee(_sender);
+
+        // Swaps one token for another, transfers desired tokens, and update context values.
         /// @dev Calculate `amountOut` as if the user first withdrew balanced liquidity and then swapped from one token for another.
         if (_tokenOut == token1) {
             // Swap `token0` for `token1`.
-            _amount1 += _getAmountOut(_amount0, _balance0 - _amount0, _balance1 - _amount1, true);
+            _amount1 += _getAmountOut(_swapFee, _amount0, _balance0 - _amount0, _balance1 - _amount1, true);
             _transferTokens(token1, _to, _amount1, _withdrawMode);
             _amountOut = _amount1;
             _amount0 = 0;
             _balance1 -= _amount1;
         } else {
             // Swap `token1` for `token0`.
-            require(_tokenOut == token0); // ensures to prevent from messing up the pool with bad parameters.
-            _amount0 += _getAmountOut(_amount1, _balance0 - _amount0, _balance1 - _amount1, false);
+            //require(_tokenOut == token0);
+            _amount0 += _getAmountOut(_swapFee, _amount1, _balance0 - _amount0, _balance1 - _amount1, false);
             _transferTokens(token0, _to, _amount0, _withdrawMode);
             _amountOut = _amount0;
             _amount1 = 0;
             _balance0 -= _amount0;
         }
 
-        // Update reserves and last invariant with up-to-date balances (updated above).
+        // Updates reserves and last invariant with up-to-date balances (updated above).
         /// @dev Using counterfactuals balances here to save gas.
         _updateReserves(_balance0, _balance1);
 
@@ -208,31 +211,42 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, ReentrancyGuard {
         emit Burn(msg.sender, _amount0, _amount1, _liquidity, _to);
     }
 
+    struct SwapContext {
+        uint swapFee;
+        uint amountIn;
+        address tokenOut;
+    }
+
     /// @dev Swaps one token for another - should be called via the router after transferring input tokens.
     /// The router should ensure that sufficient output tokens are received.
-    function swap(bytes calldata _data) external override nonReentrant returns (uint _amountOut) {
+    function swap(bytes calldata _data, address _sender) external override nonReentrant returns (uint _amountOut) {
         (address _tokenIn, address _to, uint8 _withdrawMode) = abi.decode(_data, (address, address, uint8));
         (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
         (uint _balance0, uint _balance1) = _balances();
 
+        SwapContext memory context; // use struct to avoid stack too deep errors
+
+        // Gets swap fee for the sender.
+        context.swapFee = _getSwapFee(_sender);
+
         // Calculates output amount, update context values and emit event.
-        uint _amountIn;
-        address _tokenOut;
         if (_tokenIn == token0) {
-            _tokenOut = token1;
-            _amountIn = _balance0 - _reserve0;
-            _amountOut = _getAmountOut(_amountIn, _reserve0, _reserve1, true);
+            context.tokenOut = token1;
+            context.amountIn = _balance0 - _reserve0;
+
+            _amountOut = _getAmountOut(context.swapFee, context.amountIn, _reserve0, _reserve1, true);
             _balance1 -= _amountOut;
 
-            emit Swap(msg.sender, _amountIn, 0, 0, _amountOut, _to); // emit here to avoid checking direction 
+            emit Swap(msg.sender, context.amountIn, 0, 0, _amountOut, _to); // emit here to avoid checking direction 
         } else {
             //require(_tokenIn == token1);
-            _tokenOut = token0;
-            _amountIn = _balance1 - reserve1;
-            _amountOut = _getAmountOut(_amountIn, _reserve0, _reserve1, false);
+            context.tokenOut = token0;
+            context.amountIn = _balance1 - reserve1;
+
+            _amountOut = _getAmountOut(context.swapFee, context.amountIn, _reserve0, _reserve1, false);
             _balance0 -= _amountOut;
 
-            emit Swap(msg.sender, 0, _amountIn, _amountOut, 0, _to);
+            emit Swap(msg.sender, 0, context.amountIn, _amountOut, 0, _to);
         }
 
         // Checks overflow.
@@ -244,19 +258,28 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, ReentrancyGuard {
         }
 
         // Transfers output tokens.
-        _transferTokens(_tokenOut, _to, _amountOut, _withdrawMode);
+        _transferTokens(context.tokenOut, _to, _amountOut, _withdrawMode);
 
-        // Update reserves with up-to-date balances (updated above).
+        // Updates reserves with up-to-date balances (updated above).
         /// @dev Using counterfactuals balances here to save gas.
         _updateReserves(_balance0, _balance1);
     }
 
-    function getSwapFee() public view override returns (uint24 _swapFee) {
-        _swapFee = IPoolMaster(master).getSwapFee(address(this));
+    /// @dev Returns swap fee for sender considering the forwarder.
+    function _getSwapFee(address _sender) private view returns (uint24 _swapFee) {
+        // Only reports the sender from registered forwarders.
+        _swapFee = IPoolMaster(master).getSwapFee(
+            address(this),
+            IPoolMaster(master).isForwarder(msg.sender) ? _sender : address(0)
+        );
+    }
+
+    function getSwapFee(address _sender) external view override returns (uint24 _swapFee) {
+        _swapFee = IPoolMaster(master).getSwapFee(address(this), _sender);
     }
 
     function getProtocolFee() public view override returns (uint24 _protocolFee) {
-        _protocolFee = IPoolMaster(master).protocolFee(poolType);
+        _protocolFee = IPoolMaster(master).getProtocolFee(address(this));
     }
 
     function _updateReserves(uint _balance0, uint _balance1) private {
@@ -279,27 +302,28 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, ReentrancyGuard {
 
     /// @dev This fee is charged to cover for the swap fee when users add unbalanced liquidity.
     function _unbalancedMintFee(
+        uint _swapFee,
         uint _amount0,
         uint _amount1,
         uint _reserve0,
         uint _reserve1
-    ) private view returns (uint _token0Fee, uint _token1Fee) {
+    ) private pure returns (uint _token0Fee, uint _token1Fee) {
         if (_reserve0 == 0 || _reserve1 == 0) {
             return (0, 0);
         }
         uint _amount1Optimal = (_amount0 * _reserve1) / _reserve0;
         if (_amount1 >= _amount1Optimal) {
-            _token1Fee = (getSwapFee() * (_amount1 - _amount1Optimal)) / (2 * MAX_FEE);
+            _token1Fee = (_swapFee * (_amount1 - _amount1Optimal)) / (2 * MAX_FEE);
         } else {
             uint _amount0Optimal = (_amount1 * _reserve0) / _reserve1;
-            _token0Fee = (getSwapFee() * (_amount0 - _amount0Optimal)) / (2 * MAX_FEE);
+            _token0Fee = (_swapFee * (_amount0 - _amount0Optimal)) / (2 * MAX_FEE);
         }
     }
 
     function _mintProtocolFee(uint _reserve0, uint _reserve1, uint _invariant) private returns (bool _feeOn, uint _totalSupply) {
         _totalSupply = totalSupply;
 
-        address _feeRecipient = IPoolMaster(master).feeRecipient();
+        address _feeRecipient = IPoolMaster(master).getFeeRecipient();
         _feeOn = (_feeRecipient != address(0));
 
         uint _invariantLast = invariantLast;
@@ -322,7 +346,7 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, ReentrancyGuard {
                     }
                 }
             } else {
-                /// @dev Reset last invariant to clear measured growth if protocol fee is not enabled.
+                /// @dev Resets last invariant to clear measured growth if protocol fee is not enabled.
                 invariantLast = 0;
             }
         }
@@ -332,26 +356,27 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, ReentrancyGuard {
         (_reserve0, _reserve1) = (reserve0, reserve1);
     }
 
-    function getAmountOut(address _tokenIn, uint _amountIn) external view override returns (uint _finalAmountOut) {
+    function getAmountOut(address _tokenIn, uint _amountIn, address _sender) external view override returns (uint _finalAmountOut) {
         (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
-        _finalAmountOut = _getAmountOut(_amountIn, _reserve0, _reserve1, _tokenIn == token0);
+        _finalAmountOut = _getAmountOut(_getSwapFee(_sender), _amountIn, _reserve0, _reserve1, _tokenIn == token0);
     }
 
-    function getAmountIn(address _tokenOut, uint _amountOut) external view override returns (uint _finalAmountIn) {
+    function getAmountIn(address _tokenOut, uint _amountOut, address _sender) external view override returns (uint _finalAmountIn) {
         (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
-        _finalAmountIn = _getAmountIn(_amountOut, _reserve0, _reserve1, _tokenOut == token0);
+        _finalAmountIn = _getAmountIn(_getSwapFee(_sender), _amountOut, _reserve0, _reserve1, _tokenOut == token0);
     }
 
     function _getAmountOut(
+        uint _swapFee,
         uint _amountIn,
         uint _reserve0,
         uint _reserve1,
         bool _token0In
-    ) private view returns (uint _dy) {
+    ) private pure returns (uint _dy) {
         if (_amountIn == 0) {
             _dy = 0;
         } else {
-            uint _amountInWithFee = _amountIn * (MAX_FEE - getSwapFee());
+            uint _amountInWithFee = _amountIn * (MAX_FEE - _swapFee);
             if (_token0In) {
                 _dy = (_amountInWithFee * _reserve1) / (_reserve0 * MAX_FEE + _amountInWithFee);
             } else {
@@ -361,18 +386,19 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, ReentrancyGuard {
     }
 
     function _getAmountIn(
+        uint _swapFee,
         uint _amountOut,
         uint _reserve0,
         uint _reserve1,
         bool _token0Out
-    ) private view returns (uint _dx) {
+    ) private pure returns (uint _dx) {
         if (_amountOut == 0) {
             _dx = 0;
         } else {
             if (_token0Out) {
-                _dx = (_reserve1 * _amountOut * MAX_FEE) / ((_reserve0 - _amountOut) * (MAX_FEE - getSwapFee())) + 1;
+                _dx = (_reserve1 * _amountOut * MAX_FEE) / ((_reserve0 - _amountOut) * (MAX_FEE - _swapFee)) + 1;
             } else {
-                _dx = (_reserve0 * _amountOut * MAX_FEE) / ((_reserve1 - _amountOut) * (MAX_FEE - getSwapFee())) + 1;
+                _dx = (_reserve0 * _amountOut * MAX_FEE) / ((_reserve1 - _amountOut) * (MAX_FEE - _swapFee)) + 1;
             }
         }
     }

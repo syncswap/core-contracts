@@ -45,7 +45,7 @@ function encodeAddress(address: string): string {
 
 async function mint() {
   const data = encodeAddress(wallet.address);
-  return pool.mint(data);
+  return pool.mint(data, wallet.address);
 }
 
 async function burn() {
@@ -59,14 +59,14 @@ async function burnSingle(tokenOut: string) {
   const data = defaultAbiCoder.encode(
     ["address", "address", "uint8"], [tokenOut, wallet.address, 1] // 1 = UNWRAPPED
   );
-  return pool.burnSingle(data);
+  return pool.burnSingle(data, wallet.address);
 }
 
 async function swap(tokenIn: string) {
   const data = defaultAbiCoder.encode(
     ["address", "address", "uint8"], [tokenIn, wallet.address, 1] // 1 = UNWRAPPED
   );
-  return pool.swap(data);
+  return pool.swap(data, wallet.address);
 }
 
 async function tryMint(
@@ -89,6 +89,7 @@ async function tryMint(
   expect(await balanceOf(token1, pool)).to.eq(token1Amount.add(poolBalance1Before));
 
   const calculated = await calculateLiquidityToMint(
+    wallet.address,
     vault,
     pool,
     token0Amount,
@@ -200,7 +201,7 @@ async function tryBurnSingle(
   const token0AmountBalanced = calculatePoolTokens(liquidity, poolBalance0, totalSupply);
   const token1AmountBalanced = calculatePoolTokens(liquidity, poolBalance1, totalSupply);
 
-  const swapFee = await getSwapFee(pool);
+  const swapFee = await getSwapFee(pool, wallet.address);
   const token0Amount = (
     tokenOut == token0.address ?
       token0AmountBalanced.add(getAmountOut({
@@ -232,7 +233,7 @@ async function tryBurnSingle(
   expect(await balanceOf(pool, wallet)).to.eq(liquidityBalance.sub(liquidity));
   expect(await balanceOf(pool, pool)).to.eq(liquidity);
 
-  const isToken0Out = tokenOut == token0.address;
+  //const isToken0Out = tokenOut == token0.address;
 
   await expect(burnSingle(tokenOut))
     .to.emit(pool, 'Transfer')
@@ -286,7 +287,7 @@ async function trySwap(
     amountIn: amountIn,
     reserveIn: reserveIn,
     reserveOut: reserveOut,
-    swapFee: await getSwapFee(pool),
+    swapFee: await getSwapFee(pool, wallet.address),
     //tokenInPrecisionMultiplier: tokenInPrecisionMultiplier,
     //tokenOutPrecisionMultiplier: tokenOutPrecisionMultiplier
   });
@@ -424,8 +425,8 @@ describe('Classic Pool', () => {
 
     token0Amount = expandTo18Decimals(4);
     token1Amount = expandTo18Decimals(4);
-    await tryMint(token0Amount, token1Amount, '4313274589435520146', '4500000000000000', '0');
-    expect(await pool.totalSupply()).to.eq('6314620955946113419');
+    await tryMint(token0Amount, token1Amount, '4315211208054407211', '4500000000000000', '0');
+    expect(await pool.totalSupply()).to.eq('6317456159747988712');
 
     // Add calculated balanced liquidity expects no fee.
     const reserve0 = await pool.reserve0();
@@ -433,8 +434,8 @@ describe('Classic Pool', () => {
     token0Amount = expandTo18Decimals(1);
     token1Amount = token0Amount.mul(reserve1).div(reserve0);
     expect(token1Amount).to.eq('1600000000000000000');
-    await tryMint(token0Amount, token1Amount, '1262924191189222684', '0', '0');
-    expect(await pool.totalSupply()).to.eq('7577545147135336103');
+    await tryMint(token0Amount, token1Amount, '1263491231949597742', '0', '0');
+    expect(await pool.totalSupply()).to.eq('7580947391697586454');
   });
 
   // Burn liquidity
