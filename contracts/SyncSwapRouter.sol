@@ -51,12 +51,6 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
         wETH = _wETH;
     }
 
-    /*
-    receive() external payable {
-        require(msg.sender == wETH); // only accept ETH via fallback from the WETH contract
-    }
-    */
-
     // Add Liquidity
     function _transferFromSender(address token, address to, uint amount) private {
         if (token == NATIVE_ETH) {

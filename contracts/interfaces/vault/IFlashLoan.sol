@@ -3,8 +3,11 @@
 pragma solidity >=0.5.0;
 
 import "./IFlashLoanRecipient.sol";
+import "./IERC3156FlashLender.sol";
 
-interface IFlashLoan {
+interface IFlashLoan is IERC3156FlashLender {
+    function flashLoanFeePercentage() external view returns (uint);
+
     /**
      * @dev Performs a 'flash loan', sending tokens to `recipient`, executing the `receiveFlashLoan` hook on it,
      * and then reverting unless the tokens plus a proportional protocol fee have been returned.
@@ -17,17 +20,15 @@ interface IFlashLoan {
      *
      * Emits `FlashLoan` events.
      */
-    function flashLoan(
+    function flashLoanMultiple(
         IFlashLoanRecipient recipient,
         address[] memory tokens,
         uint[] memory amounts,
         bytes memory userData
     ) external;
 
-    function flashLoanFeePercentage() external view returns (uint);
-
     /**
      * @dev Emitted for each individual flash loan performed by `flashLoan`.
      */
-    event FlashLoan(IFlashLoanRecipient indexed recipient, address indexed token, uint amount, uint feeAmount);
+    event FlashLoan(address indexed recipient, address indexed token, uint amount, uint feeAmount);
 }

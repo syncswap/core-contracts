@@ -16,7 +16,9 @@ import "../libraries/TransferHelper.sol";
  */
 abstract contract VaultFlashLoans is IVault, ReentrancyGuard, Pausable {
 
-    // Absolute maximum fee percentages (1e18 = 100%, 1e16 = 1%).
+    bytes32 public constant ERC3156_CALLBACK_SUCCESS = keccak256("ERC3156FlashBorrower.onFlashLoan");
+
+    /// @dev Absolute maximum fee percentages (1e18 = 100%, 1e16 = 1%).
     uint private constant _MAX_PROTOCOL_FLASH_LOAN_FEE_PERCENTAGE = 10e16; // 10%
 
     // All fee percentages are 18-decimal fixed point numbers.
@@ -66,7 +68,19 @@ abstract contract VaultFlashLoans is IVault, ReentrancyGuard, Pausable {
         }
     }
 
-    function flashLoan(
+    /**
+     * @dev Performs a 'flash loan', sending tokens to `recipient`, executing the `receiveFlashLoan` hook on it,
+     * and then reverting unless the tokens plus a proportional protocol fee have been returned.
+     *
+     * The `tokens` and `amounts` arrays must have the same length, and each entry in these indicates the loan amount
+     * for each token contract. `tokens` must be sorted in ascending order.
+     *
+     * The 'userData' field is ignored by the Vault, and forwarded as-is to `recipient` as part of the
+     * `receiveFlashLoan` call.
+     *
+     * Emits `FlashLoan` events.
+     */
+    function flashLoanMultiple(
         IFlashLoanRecipient recipient,
         address[] memory tokens,
         uint[] memory amounts,
@@ -123,11 +137,70 @@ abstract contract VaultFlashLoans is IVault, ReentrancyGuard, Pausable {
             require(receivedFeeAmount >= feeAmounts[i], "INSUFFICIENT_FLASH_LOAN_FEE_AMOUNT");
 
             _payFeeAmount(token, receivedFeeAmount);
-            emit FlashLoan(recipient, token, amounts[i], receivedFeeAmount);
+            emit FlashLoan(address(recipient), token, amounts[i], receivedFeeAmount);
 
             unchecked {
                 ++i;
             }
         }
+    }
+
+    // EIP-3156 Implementations
+
+    /**
+     * @dev The amount of currency available to be lent.
+     * @param token The loan currency.
+     * @return The amount of `token` that can be borrowed.
+     */
+    function maxFlashLoan(address token) external view override returns (uint256) {
+        return IERC20(token).balanceOf(address(this));
+    }
+
+    /**
+     * @dev The fee to be charged for a given loan.
+     * @param amount The amount of tokens lent.
+     * @return The amount of `token` to be charged for the loan, on top of the returned principal.
+     */
+    function flashFee(address /*token*/, uint256 amount) external view override returns (uint256) {
+        return _calculateFlashLoanFeeAmount(amount);
+    }
+
+    /**
+     * @dev Initiate a flash loan.
+     * @param receiver The receiver of the tokens in the loan, and the receiver of the callback.
+     * @param token The loan currency.
+     * @param amount The amount of tokens lent.
+     * @param userData Arbitrary data structure, intended to contain user-defined parameters.
+     */
+    function flashLoan(
+        IERC3156FlashBorrower receiver,
+        address token,
+        uint amount,
+        bytes memory userData
+    ) external override nonReentrant whenNotPaused returns (bool) {
+        uint preLoanBalance = IERC20(token).balanceOf(address(this));
+        uint feeAmount = _calculateFlashLoanFeeAmount(amount);
+
+        require(preLoanBalance >= amount, "INSUFFICIENT_FLASH_LOAN_BALANCE");
+        TransferHelper.safeTransfer(token, address(receiver), amount);
+
+        require(
+            receiver.onFlashLoan(msg.sender, token, amount, feeAmount, userData) == ERC3156_CALLBACK_SUCCESS,
+            "IERC3156_CALLBACK_FAILED"
+        );
+
+        // Checking for loan repayment first (without accounting for fees) makes for simpler debugging, and results
+        // in more accurate revert reasons if the flash loan protocol fee percentage is zero.
+        uint postLoanBalance = IERC20(token).balanceOf(address(this));
+        require(postLoanBalance >= preLoanBalance, "INVALID_POST_LOAN_BALANCE");
+
+        // No need for checked arithmetic since we know the loan was fully repaid.
+        uint receivedFeeAmount = postLoanBalance - preLoanBalance;
+        require(receivedFeeAmount >= feeAmount, "INSUFFICIENT_FLASH_LOAN_FEE_AMOUNT");
+
+        _payFeeAmount(token, receivedFeeAmount);
+
+        emit FlashLoan(address(receiver), token, amount, receivedFeeAmount);
+        return true;
     }
 }

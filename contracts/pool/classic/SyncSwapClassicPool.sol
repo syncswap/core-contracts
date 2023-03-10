@@ -181,19 +181,27 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, ReentrancyGuard {
         // Gets swap fee for the sender.
         uint _swapFee = _getSwapFee(_sender);
 
+        uint _amountSwapped; uint _feeIn;
+
         // Swaps one token for another, transfers desired tokens, and update context values.
         /// @dev Calculate `amountOut` as if the user first withdrew balanced liquidity and then swapped from one token for another.
         if (_tokenOut == token1) {
-            // Swap `token0` for `token1`.
-            _amount1 += _getAmountOut(_swapFee, _amount0, _balance0 - _amount0, _balance1 - _amount1, true);
+            // Swaps `token0` for `token1`.
+            //_amount1 += _getAmountOut(_swapFee, _amount0, _balance0 - _amount0, _balance1 - _amount1, true);
+            (_amountSwapped, _feeIn) = _getAmountOut(_swapFee, _amount0, _balance0 - _amount0, _balance1 - _amount1, true);
+            _amount1 += _amountSwapped;
+
             _transferTokens(token1, _to, _amount1, _withdrawMode);
             _amountOut = _amount1;
             _amount0 = 0;
             _balance1 -= _amount1;
         } else {
-            // Swap `token1` for `token0`.
+            // Swaps `token1` for `token0`.
             //require(_tokenOut == token0);
-            _amount0 += _getAmountOut(_swapFee, _amount1, _balance0 - _amount0, _balance1 - _amount1, false);
+            //_amount0 += _getAmountOut(_swapFee, _amount1, _balance0 - _amount0, _balance1 - _amount1, false);
+            (_amountSwapped, _feeIn) = _getAmountOut(_swapFee, _amount1, _balance0 - _amount0, _balance1 - _amount1, false);
+            _amount0 += _amountSwapped;
+
             _transferTokens(token0, _to, _amount0, _withdrawMode);
             _amountOut = _amount0;
             _amount1 = 0;
@@ -229,12 +237,14 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, ReentrancyGuard {
         // Gets swap fee for the sender.
         context.swapFee = _getSwapFee(_sender);
 
+        uint _feeIn;
+
         // Calculates output amount, update context values and emit event.
         if (_tokenIn == token0) {
             context.tokenOut = token1;
             context.amountIn = _balance0 - _reserve0;
 
-            _amountOut = _getAmountOut(context.swapFee, context.amountIn, _reserve0, _reserve1, true);
+            (_amountOut, _feeIn) = _getAmountOut(context.swapFee, context.amountIn, _reserve0, _reserve1, true);
             _balance1 -= _amountOut;
 
             emit Swap(msg.sender, context.amountIn, 0, 0, _amountOut, _to); // emit here to avoid checking direction 
@@ -243,7 +253,7 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, ReentrancyGuard {
             context.tokenOut = token0;
             context.amountIn = _balance1 - reserve1;
 
-            _amountOut = _getAmountOut(context.swapFee, context.amountIn, _reserve0, _reserve1, false);
+            (_amountOut, _feeIn) = _getAmountOut(context.swapFee, context.amountIn, _reserve0, _reserve1, false);
             _balance0 -= _amountOut;
 
             emit Swap(msg.sender, 0, context.amountIn, _amountOut, 0, _to);
@@ -356,14 +366,14 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, ReentrancyGuard {
         (_reserve0, _reserve1) = (reserve0, reserve1);
     }
 
-    function getAmountOut(address _tokenIn, uint _amountIn, address _sender) external view override returns (uint _finalAmountOut) {
+    function getAmountOut(address _tokenIn, uint _amountIn, address _sender) external view override returns (uint _amountOut) {
         (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
-        _finalAmountOut = _getAmountOut(_getSwapFee(_sender), _amountIn, _reserve0, _reserve1, _tokenIn == token0);
+        (_amountOut,) = _getAmountOut(_getSwapFee(_sender), _amountIn, _reserve0, _reserve1, _tokenIn == token0);
     }
 
-    function getAmountIn(address _tokenOut, uint _amountOut, address _sender) external view override returns (uint _finalAmountIn) {
+    function getAmountIn(address _tokenOut, uint _amountOut, address _sender) external view override returns (uint _amountIn) {
         (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
-        _finalAmountIn = _getAmountIn(_getSwapFee(_sender), _amountOut, _reserve0, _reserve1, _tokenOut == token0);
+        _amountIn = _getAmountIn(_getSwapFee(_sender), _amountOut, _reserve0, _reserve1, _tokenOut == token0);
     }
 
     function _getAmountOut(
@@ -372,11 +382,13 @@ contract SyncSwapClassicPool is IClassicPool, SyncSwapLPToken, ReentrancyGuard {
         uint _reserve0,
         uint _reserve1,
         bool _token0In
-    ) private pure returns (uint _dy) {
+    ) private pure returns (uint _dy, uint _feeIn) {
         if (_amountIn == 0) {
             _dy = 0;
         } else {
             uint _amountInWithFee = _amountIn * (MAX_FEE - _swapFee);
+            _feeIn = _amountIn - _amountInWithFee;
+
             if (_token0In) {
                 _dy = (_amountInWithFee * _reserve1) / (_reserve0 * MAX_FEE + _amountInWithFee);
             } else {
