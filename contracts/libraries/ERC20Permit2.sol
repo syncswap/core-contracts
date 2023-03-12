@@ -17,7 +17,7 @@ error InvalidSignature();
  * Based on Solmate's ERC20.
  * https://github.com/transmissions11/solmate/blob/bff24e835192470ed38bf15dbed6084c2d723ace/src/tokens/ERC20.sol
  */
-contract SyncSwapLPToken is IERC165, IERC20Permit2 {
+contract ERC20Permit2 is IERC165, IERC20Permit2 {
     uint8 public immutable override decimals = 18;
 
     uint public override totalSupply;

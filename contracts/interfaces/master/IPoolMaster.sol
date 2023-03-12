@@ -17,9 +17,9 @@ interface IPoolMaster is IFeeManager, IForwarderRegistry {
         bytes data
     );
 
-    event UpdateForwarderRegistry(address indexed previousForwarderRegistry, address indexed newForwarderRegistry);
+    event UpdateForwarderRegistry(address indexed newForwarderRegistry);
 
-    event UpdateFeeManager(address indexed previousFeeManager, address indexed newFeeManager);
+    event UpdateFeeManager(address indexed newFeeManager);
 
     function vault() external view returns (address);
 

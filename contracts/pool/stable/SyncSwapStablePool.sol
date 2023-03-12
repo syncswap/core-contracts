@@ -2,24 +2,25 @@
 
 pragma solidity ^0.8.0;
 
-import "../../libraries/ReentrancyGuard.sol";
 import "../../libraries/Math.sol";
 import "../../libraries/StableMath.sol";
+import "../../libraries/ERC20Permit2.sol";
 import "../../libraries/MetadataHelper.sol";
+import "../../libraries/ReentrancyGuard.sol";
 
+import "../../interfaces/ICallback.sol";
 import "../../interfaces/vault/IVault.sol";
+import "../../interfaces/pool/IStablePool.sol";
 import "../../interfaces/master/IPoolMaster.sol";
 import "../../interfaces/factory/IPoolFactory.sol";
-import "../../interfaces/pool/IStablePool.sol";
-
-import "../SyncSwapLPToken.sol";
 
 error Overflow();
 error InsufficientLiquidityMinted();
 
-contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, ReentrancyGuard {
+contract SyncSwapStablePool is IStablePool, ERC20Permit2, ReentrancyGuard {
     using Math for uint;
 
+    /// @dev The max adjusted reserve of two tokens to avoid overflow.
     uint private constant MAXIMUM_XP = 3802571709128108338056982581425910818;
     uint private constant MINIMUM_LIQUIDITY = 1000;
     uint private constant MAX_FEE = 1e5; /// @dev 100%.
@@ -87,226 +88,293 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, ReentrancyGuard {
         assets[1] = token1;
     }
 
+    /// @dev Returns the verified sender address otherwise `address(0)`.
+    function _getVerifiedSender(address _sender) private view returns (address) {
+        if (_sender != address(0)) {
+            if (_sender != msg.sender) {
+                if (!IPoolMaster(master).isForwarder(msg.sender)) {
+                    // The sender from non-forwarder is invalid.
+                    return address(0);
+                }
+            }
+        }
+        return _sender;
+    }
+
     /// @dev Mints LP tokens - should be called via the router after transferring pool tokens.
     /// The router should ensure that sufficient LP tokens are minted.
-    function mint(bytes calldata _data, address _sender) external override nonReentrant returns (uint _liquidity) {
-        address _to = abi.decode(_data, (address));
-        (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
-        (uint _balance0, uint _balance1) = _balances();
+    function mint(
+        bytes calldata _data,
+        address _sender,
+        address _callback,
+        bytes calldata _callbackData
+    ) external override nonReentrant returns (uint) {
+        ICallback.BaseMintCallbackParams memory params;
 
-        uint _newInvariant = _computeInvariant(_balance0, _balance1);
-        uint _amount0 = _balance0 - _reserve0;
-        uint _amount1 = _balance1 - _reserve1;
+        params.to = abi.decode(_data, (address));
+        (params.reserve0, params.reserve1) = (reserve0, reserve1);
+        (params.balance0, params.balance1) = _balances();
+
+        params.newInvariant = _computeInvariant(params.balance0, params.balance1);
+        params.amount0 = params.balance0 - params.reserve0;
+        params.amount1 = params.balance1 - params.reserve1;
         //require(_amount0 != 0 && _amount1 != 0);
 
-        {
+        // Gets swap fee for the sender.
+        _sender = _getVerifiedSender(_sender);
+        params.swapFee = getSwapFee(_sender);
+
         // Adds mint fee to reserves (applies to invariant increase) if unbalanced.
-        (uint _fee0, uint _fee1) = _unbalancedMintFee(_getSwapFee(_sender), _amount0, _amount1, _reserve0, _reserve1);
-        _reserve0 += _fee0;
-        _reserve1 += _fee1;
-        }
+        (params.fee0, params.fee1) = _unbalancedMintFee(params.swapFee, params.amount0, params.amount1, params.reserve0, params.reserve1);
+        params.reserve0 += params.fee0;
+        params.reserve1 += params.fee1;
 
-        {
         // Calculates old invariant (where unbalanced fee added to) and, mint protocol fee if any.
-        uint _oldInvariant = _computeInvariant(_reserve0, _reserve1);
-        (bool _feeOn, uint _totalSupply) = _mintProtocolFee(0, 0, _oldInvariant);
+        params.oldInvariant = _computeInvariant(params.reserve0, params.reserve1);
+        bool _feeOn;
+        (_feeOn, params.totalSupply) = _mintProtocolFee(0, 0, params.oldInvariant);
 
-        if (_totalSupply == 0) {
-            _liquidity = _newInvariant - MINIMUM_LIQUIDITY;
+        if (params.totalSupply == 0) {
+            params.liquidity = params.newInvariant - MINIMUM_LIQUIDITY;
             _mint(address(0), MINIMUM_LIQUIDITY); // permanently lock on first mint.
         } else {
             // Calculates liquidity proportional to invariant growth.
-            _liquidity = ((_newInvariant - _oldInvariant) * _totalSupply) / _oldInvariant;
+            params.liquidity = ((params.newInvariant - params.oldInvariant) * params.totalSupply) / params.oldInvariant;
         }
 
         // Mints liquidity for recipient.
-        if (_liquidity == 0) revert InsufficientLiquidityMinted();
-        _mint(_to, _liquidity);
+        if (params.liquidity == 0) {
+            revert InsufficientLiquidityMinted();
+        }
+        _mint(params.to, params.liquidity);
+
+        // Calls callback with data.
+        if (_callback != address(0)) {
+            // Fills additional values for callback params.
+            params.sender = _sender;
+            params.callbackData = _callbackData;
+
+            ICallback(_callback).syncSwapBaseMintCallback(params);
+        }
 
         // Updates reserves and last invariant with new balances.
-        _updateReserves(_balance0, _balance1);
-
+        _updateReserves(params.balance0, params.balance1);
         if (_feeOn) {
-            invariantLast = _newInvariant;
-        }
+            invariantLast = params.newInvariant;
         }
 
-        emit Mint(msg.sender, _amount0, _amount1, _liquidity, _to);
+        emit Mint(msg.sender, params.amount0, params.amount1, params.liquidity, params.to);
+
+        return params.liquidity;
     }
 
     /// @dev Burns LP tokens sent to this contract.
     /// The router should ensure that sufficient pool tokens are received.
-    function burn(bytes calldata _data) external override nonReentrant returns (TokenAmount[] memory _amounts) {
-        (address _to, uint8 _withdrawMode) = abi.decode(_data, (address, uint8));
-        (uint _balance0, uint _balance1) = _balances();
-        uint _liquidity = balanceOf[address(this)];
+    function burn(
+        bytes calldata _data,
+        address _sender,
+        address _callback,
+        bytes calldata _callbackData
+    ) external override nonReentrant returns (TokenAmount[] memory _amounts) {
+        ICallback.BaseBurnCallbackParams memory params;
+
+        (params.to, params.withdrawMode) = abi.decode(_data, (address, uint8));
+        (params.balance0, params.balance1) = _balances();
+        params.liquidity = balanceOf[address(this)];
 
         // Mints protocol fee if any.
-        (bool _feeOn, uint _totalSupply) = _mintProtocolFee(_balance0, _balance1, 0);
+        // Note `_mintProtocolFee` here will checks overflow.
+        bool _feeOn;
+        (_feeOn, params.totalSupply) = _mintProtocolFee(params.balance0, params.balance1, 0);
 
         // Calculates amounts of pool tokens proportional to balances.
-        uint _amount0 = _liquidity * _balance0 / _totalSupply;
-        uint _amount1 = _liquidity * _balance1 / _totalSupply;
+        params.amount0 = params.liquidity * params.balance0 / params.totalSupply;
+        params.amount1 = params.liquidity * params.balance1 / params.totalSupply;
         //require(_amount0 != 0 || _amount1 != 0);
 
         // Burns liquidity and transfers pool tokens.
-        _burn(address(this), _liquidity);
-        _transferTokens(token0, _to, _amount0, _withdrawMode);
-        _transferTokens(token1, _to, _amount1, _withdrawMode);
+        _burn(address(this), params.liquidity);
+        _transferTokens(token0, params.to, params.amount0, params.withdrawMode);
+        _transferTokens(token1, params.to, params.amount1, params.withdrawMode);
+
+        // Updates balances.
+        /// @dev Cannot underflow because amounts are lesser figures derived from balances.
+        unchecked {
+            params.balance0 -= params.amount0;
+            params.balance1 -= params.amount1;
+        }
+
+        // Calls callback with data.
+        // Note reserves are not updated at this point to allow read the old values.
+        if (_callback != address(0)) {
+            // Fills additional values for callback params.
+            params.sender = _getVerifiedSender(_sender);
+            params.callbackData = _callbackData;
+
+            ICallback(_callback).syncSwapBaseBurnCallback(params);
+        }
 
         // Updates reserves and last invariant with up-to-date balances (after transfers).
-        /// @dev Using counterfactuals balances here to save gas.
-        /// Cannot underflow because amounts are lesser figures derived from balances.
-        unchecked {
-            _balance0 -= _amount0;
-            _balance1 -= _amount1;
-        }
-        _updateReserves(_balance0, _balance1);
-
+        _updateReserves(params.balance0, params.balance1);
         if (_feeOn) {
-            invariantLast = _computeInvariant(_balance0, _balance1);
+            invariantLast = _computeInvariant(params.balance0, params.balance1);
         }
 
         _amounts = new TokenAmount[](2);
-        _amounts[0] = TokenAmount(token0, _amount0);
-        _amounts[1] = TokenAmount(token1, _amount1);
+        _amounts[0] = TokenAmount(token0, params.amount0);
+        _amounts[1] = TokenAmount(token1, params.amount1);
 
-        emit Burn(msg.sender, _amount0, _amount1, _liquidity, _to);
+        emit Burn(msg.sender, params.amount0, params.amount1, params.liquidity, params.to);
     }
 
     /// @dev Burns LP tokens sent to this contract and swaps one of the output tokens for another
     /// - i.e., the user gets a single token out by burning LP tokens.
     /// The router should ensure that sufficient pool tokens are received.
-    function burnSingle(bytes calldata _data, address _sender) external override nonReentrant returns (uint _amountOut) {
-        (address _tokenOut, address _to, uint8 _withdrawMode) = abi.decode(_data, (address, address, uint8));
-        (uint _balance0, uint _balance1) = _balances();
-        uint _liquidity = balanceOf[address(this)];
+    function burnSingle(
+        bytes calldata _data,
+        address _sender,
+        address _callback,
+        bytes calldata _callbackData
+    ) external override nonReentrant returns (TokenAmount memory _tokenAmount) {
+        ICallback.BaseBurnSingleCallbackParams memory params;
+
+        (params.tokenOut, params.to, params.withdrawMode) = abi.decode(_data, (address, address, uint8));
+        (params.balance0, params.balance1) = _balances();
+        params.liquidity = balanceOf[address(this)];
 
         // Mints protocol fee if any.
-        (bool _feeOn, uint _totalSupply) = _mintProtocolFee(_balance0, _balance1, 0);
+        // Note `_mintProtocolFee` here will checks overflow.
+        bool _feeOn;
+        (_feeOn, params.totalSupply) = _mintProtocolFee(params.balance0, params.balance1, 0);
 
         // Calculates amounts of pool tokens proportional to balances.
-        uint _amount0 = _liquidity * _balance0 / _totalSupply;
-        uint _amount1 = _liquidity * _balance1 / _totalSupply;
+        params.amount0 = params.liquidity * params.balance0 / params.totalSupply;
+        params.amount1 = params.liquidity * params.balance1 / params.totalSupply;
 
-        // Burns liquidity and, update last invariant using counterfactuals balances.
-        _burn(address(this), _liquidity);
+        // Burns liquidity.
+        _burn(address(this), params.liquidity);
 
         // Gets swap fee for the sender.
-        uint _swapFee = _getSwapFee(_sender);
-
-        uint _amountSwapped; uint _feeIn;
+        _sender = _getVerifiedSender(_sender);
+        params.swapFee = getSwapFee(_sender);
 
         // Swaps one token for another, transfers desired tokens, and update context values.
         /// @dev Calculate `amountOut` as if the user first withdrew balanced liquidity and then swapped from one token for another.
-        if (_tokenOut == token1) {
+        if (params.tokenOut == token1) {
             // Swaps `token0` for `token1`.
-            //_amount1 += _getAmountOut(_swapFee, _amount0, _balance0 - _amount0, _balance1 - _amount1, true);
-            (_amountSwapped, _feeIn) = _getAmountOut(_swapFee, _amount0, _balance0 - _amount0, _balance1 - _amount1, true);
-            _amount1 += _amountSwapped;
+            params.tokenIn = token0;
+            (params.amountSwapped, params.feeIn) = _getAmountOut(
+                params.swapFee, params.amount0, params.balance0 - params.amount0, params.balance1 - params.amount1, true
+            );
+            params.amount1 += params.amountSwapped;
 
-            _transferTokens(token1, _to, _amount1, _withdrawMode);
-            _amountOut = _amount1;
-            _amount0 = 0;
-            _balance1 -= _amount1;
+            _transferTokens(token1, params.to, params.amount1, params.withdrawMode);
+            params.amountOut = params.amount1;
+            params.amount0 = 0;
+            params.balance1 -= params.amount1;
         } else {
             // Swaps `token1` for `token0`.
             //require(_tokenOut == token0);
-            //_amount0 += _getAmountOut(_swapFee, _amount1, _balance0 - _amount0, _balance1 - _amount1, false);
-            (_amountSwapped, _feeIn) = _getAmountOut(_swapFee, _amount1, _balance0 - _amount0, _balance1 - _amount1, false);
-            _amount0 += _amountSwapped;
+            params.tokenIn = token1;
+            (params.amountSwapped, params.feeIn) = _getAmountOut(
+                params.swapFee, params.amount1, params.balance0 - params.amount0, params.balance1 - params.amount1, false
+            );
+            params.amount0 += params.amountSwapped;
 
-            _transferTokens(token0, _to, _amount0, _withdrawMode);
-            _amountOut = _amount0;
-            _amount1 = 0;
-            _balance0 -= _amount0;
+            _transferTokens(token0, params.to, params.amount0, params.withdrawMode);
+            params.amountOut = params.amount0;
+            params.amount1 = 0;
+            params.balance0 -= params.amount0;
         }
 
-        // TODO update user fee here.
+        // Calls callback with data.
+        // Note reserves are not updated at this point to allow read the old values.
+        if (_callback != address(0)) {
+            // Fills additional values for callback params.
+            params.sender = _sender;
+            params.callbackData = _callbackData;
+
+            ICallback(_callback).syncSwapBaseBurnSingleCallback(params);
+        }
 
         // Update reserves and last invariant with up-to-date balances (updated above).
-        /// @dev Using counterfactuals balances here to save gas.
-        _updateReserves(_balance0, _balance1);
-
+        _updateReserves(params.balance0, params.balance1);
         if (_feeOn) {
-            invariantLast = _computeInvariant(_balance0, _balance1);
+            invariantLast = _computeInvariant(params.balance0, params.balance1);
         }
 
-        emit Burn(msg.sender, _amount0, _amount1, _liquidity, _to);
-    }
+        _tokenAmount = TokenAmount(params.tokenOut, params.amountOut);
 
-    struct SwapContext {
-        uint swapFee;
-        uint amountIn;
-        address tokenOut;
+        emit Burn(msg.sender, params.amount0, params.amount1, params.liquidity, params.to);
     }
 
     /// @dev Swaps one token for another - should be called via the router after transferring input tokens.
     /// The router should ensure that sufficient output tokens are received.
-    function swap(bytes calldata _data, address _sender) external override nonReentrant returns (uint _amountOut) {
-        (address _tokenIn, address _to, uint8 _withdrawMode) = abi.decode(_data, (address, address, uint8));
-        (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
-        (uint _balance0, uint _balance1) = _balances();
+    function swap(
+        bytes calldata _data,
+        address _sender,
+        address _callback,
+        bytes calldata _callbackData
+    ) external override nonReentrant returns (TokenAmount memory _tokenAmount) {
+        ICallback.BaseSwapCallbackParams memory params;
 
-        SwapContext memory context; // use struct to avoid stack too deep errors
+        (params.tokenIn, params.to, params.withdrawMode) = abi.decode(_data, (address, address, uint8));
+        (params.reserve0, params.reserve1) = (reserve0, reserve1);
+        (params.balance0, params.balance1) = _balances();
 
         // Gets swap fee for the sender.
-        context.swapFee = _getSwapFee(_sender);
-
-        uint _feeIn;
+        _sender = _getVerifiedSender(_sender);
+        params.swapFee = getSwapFee(_sender);
 
         // Calculates output amount, update context values and emit event.
-        if (_tokenIn == token0) {
-            context.tokenOut = token1;
-            context.amountIn = _balance0 - _reserve0;
+        if (params.tokenIn == token0) {
+            params.tokenOut = token1;
+            params.amountIn = params.balance0 - params.reserve0;
 
-            (_amountOut, _feeIn) = _getAmountOut(context.swapFee, context.amountIn, _reserve0, _reserve1, true);
-            _balance1 -= _amountOut;
+            (params.amountOut, params.feeIn) = _getAmountOut(params.swapFee, params.amountIn, params.reserve0, params.reserve1, true);
+            params.balance1 -= params.amountOut;
 
-            emit Swap(msg.sender, context.amountIn, 0, 0, _amountOut, _to); // emit here to avoid checking direction 
+            emit Swap(msg.sender, params.amountIn, 0, 0, params.amountOut, params.to);
         } else {
-            //require(_tokenIn == token1);
-            context.tokenOut = token0;
-            context.amountIn = _balance1 - reserve1;
+            //require(params.tokenIn == token1);
+            params.tokenOut = token0;
+            params.amountIn = params.balance1 - params.reserve1;
 
-            (_amountOut, _feeIn) = _getAmountOut(context.swapFee, context.amountIn, _reserve0, _reserve1, false);
-            _balance0 -= _amountOut;
+            (params.amountOut, params.feeIn) = _getAmountOut(params.swapFee, params.amountIn, params.reserve0, params.reserve1, false);
+            params.balance0 -= params.amountOut;
 
-            emit Swap(msg.sender, 0, context.amountIn, _amountOut, 0, _to);
+            emit Swap(msg.sender, 0, params.amountIn, params.amountOut, 0, params.to);
         }
-
-        // TODO update user fee here.
-
-        // 1. get feeIn with _getAmountOut
-        // 2. notify amount of fee and the token (tokenIn)
-        // 3. notify 
 
         // Checks overflow.
-        if (_balance0 * token0PrecisionMultiplier > MAXIMUM_XP) {
+        if (params.balance0 * token0PrecisionMultiplier > MAXIMUM_XP) {
             revert Overflow();
         }
-        if (_balance1 * token1PrecisionMultiplier > MAXIMUM_XP) {
+        if (params.balance1 * token1PrecisionMultiplier > MAXIMUM_XP) {
             revert Overflow();
         }
 
         // Transfers output tokens.
-        _transferTokens(context.tokenOut, _to, _amountOut, _withdrawMode);
+        _transferTokens(params.tokenOut, params.to, params.amountOut, params.withdrawMode);
+
+        // Calls callback with data.
+        if (_callback != address(0)) {
+            // Fills additional values for callback params.
+            params.sender = _sender;
+            params.callbackData = _callbackData;
+
+            ICallback(_callback).syncSwapBaseSwapCallback(params);
+        }
 
         // Updates reserves with up-to-date balances (updated above).
-        /// @dev Using counterfactuals balances here to save gas.
-        _updateReserves(_balance0, _balance1);
+        _updateReserves(params.balance0, params.balance1);
+
+        _tokenAmount.token = params.tokenOut;
+        _tokenAmount.amount = params.amountOut;
     }
 
-    /// @dev Returns swap fee for sender considering the forwarder.
-    function _getSwapFee(address _sender) private view returns (uint24 _swapFee) {
-        // Only reports the sender from registered forwarders.
-        _swapFee = IPoolMaster(master).getSwapFee(
-            address(this),
-            IPoolMaster(master).isForwarder(msg.sender) ? _sender : address(0)
-        );
-    }
-
-    function getSwapFee(address _sender) external view override returns (uint24 _swapFee) {
+    /// @dev This function doesn't check the forwarder.
+    function getSwapFee(address _sender) public view override returns (uint24 _swapFee) {
         _swapFee = IPoolMaster(master).getSwapFee(address(this), _sender);
     }
 
@@ -332,7 +400,7 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, ReentrancyGuard {
         balance1 = IVault(vault).balanceOf(token1, address(this));
     }
 
-    /// @dev This fee is charged to cover for the swap fee when users add unbalanced liquidity.
+    /// @dev This fee is charged to cover for the swap fee when users adding unbalanced liquidity.
     function _unbalancedMintFee(
         uint _swapFee,
         uint _amount0,
@@ -390,12 +458,12 @@ contract SyncSwapStablePool is IStablePool, SyncSwapLPToken, ReentrancyGuard {
 
     function getAmountOut(address _tokenIn, uint _amountIn, address _sender) external view override returns (uint _amountOut) {
         (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
-        (_amountOut,) = _getAmountOut(_getSwapFee(_sender), _amountIn, _reserve0, _reserve1, _tokenIn == token0);
+        (_amountOut,) = _getAmountOut(getSwapFee(_sender), _amountIn, _reserve0, _reserve1, _tokenIn == token0);
     }
 
     function getAmountIn(address _tokenOut, uint _amountOut, address _sender) external view override returns (uint _amountIn) {
         (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
-        _amountIn = _getAmountIn(_getSwapFee(_sender), _amountOut, _reserve0, _reserve1, _tokenOut == token0);
+        _amountIn = _getAmountIn(getSwapFee(_sender), _amountOut, _reserve0, _reserve1, _tokenOut == token0);
     }
 
     function _getAmountOut(

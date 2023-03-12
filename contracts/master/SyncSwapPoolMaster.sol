@@ -66,8 +66,8 @@ contract SyncSwapPoolMaster is IPoolMaster, Ownable2Step {
     }
 
     function setForwarderRegistry(address newForwarderRegistry) external override onlyOwner {
-        emit UpdateForwarderRegistry(forwarderRegistry, newForwarderRegistry);
         forwarderRegistry = newForwarderRegistry;
+        emit UpdateForwarderRegistry(newForwarderRegistry);
     }
 
     // Fees
@@ -85,8 +85,8 @@ contract SyncSwapPoolMaster is IPoolMaster, Ownable2Step {
     }
 
     function setFeeManager(address newFeeManager) external override onlyOwner {
-        emit UpdateFeeManager(feeManager, newFeeManager);
         feeManager = newFeeManager;
+        emit UpdateFeeManager(newFeeManager);
     }
 
     // Factories

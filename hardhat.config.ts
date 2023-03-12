@@ -3,6 +3,7 @@ import "@matterlabs/hardhat-zksync-verify";
 import "@matterlabs/hardhat-zksync-solc";
 import "@nomiclabs/hardhat-waffle";
 import "@nomiclabs/hardhat-solhint";
+import "hardhat-gas-reporter";
 
 module.exports = {
   // hardhat-zksync-solc

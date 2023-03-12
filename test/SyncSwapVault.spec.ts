@@ -2,7 +2,7 @@ import chai, { expect } from 'chai';
 import { BigNumber, Contract } from 'ethers';
 import { solidity } from 'ethereum-waffle';
 import { expandTo18Decimals, ZERO, ZERO_ADDRESS } from './shared/utilities';
-import { deploySyncSwapLPToken, deployVault, deployWETH9 } from './shared/fixtures';
+import { deployERC20Permit2, deployVault, deployWETH9 } from './shared/fixtures';
 import { SignerWithAddress } from '@nomiclabs/hardhat-ethers/signers';
 import { HardhatEthersHelpers } from '@nomiclabs/hardhat-ethers/types';
 
@@ -30,7 +30,7 @@ describe('SyncSwapVault', () => {
   beforeEach(async () => {
     weth = await deployWETH9();
     vault = await deployVault(weth.address);
-    token = await deploySyncSwapLPToken(TOTAL_SUPPLY);
+    token = await deployERC20Permit2(TOTAL_SUPPLY);
   })
 
   it('Should deposit some ERC20 tokens', async () => {
@@ -43,7 +43,7 @@ describe('SyncSwapVault', () => {
 
   it('Should receive and deposit some ERC20 tokens', async () => {
     expect(vault.transferAndDeposit(token.address, wallet.address, TEST_AMOUNT))
-      .to.be.revertedWith('SafeTransferFromFailed()');
+      .to.be.revertedWith('0x7939f424'); // TransferFromFailed()
 
     const balanceBefore = await token.balanceOf(wallet.address);
 
@@ -54,7 +54,7 @@ describe('SyncSwapVault', () => {
     expect(await token.balanceOf(wallet.address)).to.eq(balanceBefore.sub(TEST_AMOUNT));
 
     expect(vault.transferAndDeposit(token.address, wallet.address, '1'))
-      .to.be.revertedWith('SafeTransferFromFailed()');
+      .to.be.revertedWith('0x7939f424'); // TransferFromFailed()
   });
 
   it('Should deposit some ETH', async () => {

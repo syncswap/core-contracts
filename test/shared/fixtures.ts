@@ -58,8 +58,8 @@ export async function deployStablePoolFactory(master: Contract): Promise<Contrac
     return contract;
 }
 
-export async function deploySyncSwapLPToken(totalSupply: BigNumber): Promise<Contract> {
-    const contractFactory = await ethers.getContractFactory('TestSyncSwapLPToken');
+export async function deployERC20Permit2(totalSupply: BigNumber): Promise<Contract> {
+    const contractFactory = await ethers.getContractFactory('TestERC20Permit2');
     const contract = await contractFactory.deploy(totalSupply);
     await contract.deployed();
     return contract;

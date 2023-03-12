@@ -27,14 +27,34 @@ interface IPool {
     function getProtocolFee() external view returns (uint24 protocolFee);
 
     /// @dev Mints liquidity.
-    function mint(bytes calldata data, address sender) external returns (uint liquidity);
+    function mint(
+        bytes calldata data,
+        address sender,
+        address callback,
+        bytes calldata callbackData
+    ) external returns (uint liquidity);
 
     /// @dev Burns liquidity.
-    function burn(bytes calldata data) external returns (TokenAmount[] memory amounts);
+    function burn(
+        bytes calldata data,
+        address sender,
+        address callback,
+        bytes calldata callbackData
+    ) external returns (TokenAmount[] memory tokenAmounts);
 
     /// @dev Burns liquidity with single output token.
-    function burnSingle(bytes calldata data, address sender) external returns (uint amountOut);
+    function burnSingle(
+        bytes calldata data,
+        address sender,
+        address callback,
+        bytes calldata callbackData
+    ) external returns (TokenAmount memory tokenAmount);
 
     /// @dev Swaps between tokens.
-    function swap(bytes calldata data, address sender) external returns (uint amountOut);
+    function swap(
+        bytes calldata data,
+        address sender,
+        address callback,
+        bytes calldata callbackData
+    ) external returns (TokenAmount memory tokenAmount);
 }

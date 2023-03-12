@@ -42,5 +42,8 @@
     "build-zk": "yarn hardhat compile --network zkTestnet",
     "compile": "yarn hardhat compile",
     "test": "yarn hardhat test"
+  },
+  "dependencies": {
+    "hardhat-gas-reporter": "^1.0.9"
   }
 }

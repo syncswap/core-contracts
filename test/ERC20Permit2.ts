@@ -3,7 +3,7 @@ import { BigNumber, Contract } from 'ethers';
 import { solidity } from 'ethereum-waffle';
 import { expandTo18Decimals, getPermitSignature, getSplittedPermitSignature, MAX_UINT256 } from './shared/utilities';
 import { hexlify } from 'ethers/lib/utils';
-import { deploySyncSwapLPToken } from './shared/fixtures';
+import { deployERC20Permit2 } from './shared/fixtures';
 import { SignerWithAddress } from '@nomiclabs/hardhat-ethers/signers';
 
 chai.use(solidity)
@@ -13,7 +13,7 @@ const hre = require('hardhat');
 const TOTAL_SUPPLY = expandTo18Decimals(10000);
 const TEST_AMOUNT = expandTo18Decimals(10);
 
-describe('SyncSwapLPToken', () => {
+describe('ERC20Permit2', () => {
   let wallet: SignerWithAddress;
   let other: SignerWithAddress;
   before(async () => {
@@ -24,7 +24,7 @@ describe('SyncSwapLPToken', () => {
 
   let token: Contract;
   beforeEach(async () => {
-    token = await deploySyncSwapLPToken(TOTAL_SUPPLY);
+    token = await deployERC20Permit2(TOTAL_SUPPLY);
   })
 
   it('Should return expected token metadata', async () => {

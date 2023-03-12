@@ -6,6 +6,8 @@ interface IRouter {
     struct SwapStep {
         address pool;
         bytes data;
+        address callback;
+        bytes callbackData;
     }
 
     struct SwapPath {

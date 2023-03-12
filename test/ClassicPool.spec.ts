@@ -45,28 +45,28 @@ function encodeAddress(address: string): string {
 
 async function mint() {
   const data = encodeAddress(wallet.address);
-  return pool.mint(data, wallet.address);
+  return pool.mint(data, wallet.address, ZERO_ADDRESS, '0x');
 }
 
 async function burn() {
   const data = defaultAbiCoder.encode(
     ["address", "uint8"], [wallet.address, 1] // 1 = UNWRAPPED
   );
-  return pool.burn(data);
+  return pool.burn(data, wallet.address, ZERO_ADDRESS, '0x');
 }
 
 async function burnSingle(tokenOut: string) {
   const data = defaultAbiCoder.encode(
     ["address", "address", "uint8"], [tokenOut, wallet.address, 1] // 1 = UNWRAPPED
   );
-  return pool.burnSingle(data, wallet.address);
+  return pool.burnSingle(data, wallet.address, ZERO_ADDRESS, '0x');
 }
 
 async function swap(tokenIn: string) {
   const data = defaultAbiCoder.encode(
     ["address", "address", "uint8"], [tokenIn, wallet.address, 1] // 1 = UNWRAPPED
   );
-  return pool.swap(data, wallet.address);
+  return pool.swap(data, wallet.address, ZERO_ADDRESS, '0x');
 }
 
 async function tryMint(

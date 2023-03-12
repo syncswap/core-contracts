@@ -69,7 +69,9 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
         address pool,
         TokenInput[] calldata inputs,
         bytes calldata data,
-        uint minLiquidity
+        uint minLiquidity,
+        address callback,
+        bytes calldata callbackData
     ) private returns (uint liquidity) {
         // Send all input tokens to the pool.
         uint n = inputs.length;
@@ -86,7 +88,7 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
             }
         }
 
-        liquidity = IPool(pool).mint(data, msg.sender);
+        liquidity = IPool(pool).mint(data, msg.sender, callback, callbackData);
 
         if (liquidity < minLiquidity) {
             revert NotEnoughLiquidityMinted();
@@ -97,13 +99,17 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
         address pool,
         TokenInput[] calldata inputs,
         bytes calldata data,
-        uint minLiquidity
+        uint minLiquidity,
+        address callback,
+        bytes calldata callbackData
     ) external payable returns (uint liquidity) {
         liquidity = _transferAndAddLiquidity(
             pool,
             inputs,
             data,
-            minLiquidity
+            minLiquidity,
+            callback,
+            callbackData
         );
     }
 
@@ -112,6 +118,8 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
         TokenInput[] calldata inputs,
         bytes calldata data,
         uint minLiquidity,
+        address callback,
+        bytes calldata callbackData,
         SplitPermitParams[] memory permits
     ) external payable returns (uint liquidity) {
         // Approve all tokens via permit.
@@ -141,7 +149,9 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
             pool,
             inputs,
             data,
-            minLiquidity
+            minLiquidity,
+            callback,
+            callbackData
         );
     }
 
@@ -150,11 +160,13 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
         address pool,
         uint liquidity,
         bytes memory data,
-        uint[] memory minAmounts
+        uint[] memory minAmounts,
+        address callback,
+        bytes calldata callbackData
     ) private returns (IPool.TokenAmount[] memory amounts) {
         IBasePool(pool).transferFrom(msg.sender, pool, liquidity);
 
-        amounts = IPool(pool).burn(data);
+        amounts = IPool(pool).burn(data, msg.sender, callback, callbackData);
 
         uint n = amounts.length;
 
@@ -173,13 +185,17 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
         address pool,
         uint liquidity,
         bytes calldata data,
-        uint[] calldata minAmounts
+        uint[] calldata minAmounts,
+        address callback,
+        bytes calldata callbackData
     ) external returns (IPool.TokenAmount[] memory amounts) {
         amounts = _transferAndBurnLiquidity(
             pool,
             liquidity,
             data,
-            minAmounts
+            minAmounts,
+            callback,
+            callbackData
         );
     }
 
@@ -188,6 +204,8 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
         uint liquidity,
         bytes calldata data,
         uint[] calldata minAmounts,
+        address callback,
+        bytes calldata callbackData,
         ArrayPermitParams memory permit
     ) external returns (IPool.TokenAmount[] memory amounts) {
         // Approve liquidity via permit.
@@ -203,7 +221,9 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
             pool,
             liquidity,
             data,
-            minAmounts
+            minAmounts,
+            callback,
+            callbackData
         );
     }
 
@@ -212,13 +232,15 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
         address pool,
         uint liquidity,
         bytes memory data,
-        uint minAmount
-    ) private returns (uint amountOut) {
+        uint minAmount,
+        address callback,
+        bytes memory callbackData
+    ) private returns (IPool.TokenAmount memory amountOut) {
         IBasePool(pool).transferFrom(msg.sender, pool, liquidity);
 
-        amountOut = IPool(pool).burnSingle(data, msg.sender);
+        amountOut = IPool(pool).burnSingle(data, msg.sender, callback, callbackData);
 
-        if (amountOut < minAmount) {
+        if (amountOut.amount < minAmount) {
             revert TooLittleReceived();
         }
     }
@@ -227,13 +249,17 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
         address pool,
         uint liquidity,
         bytes memory data,
-        uint minAmount
-    ) external returns (uint amountOut) {
+        uint minAmount,
+        address callback,
+        bytes memory callbackData
+    ) external returns (IPool.TokenAmount memory amountOut) {
         amountOut = _transferAndBurnLiquiditySingle(
             pool,
             liquidity,
             data,
-            minAmount
+            minAmount,
+            callback,
+            callbackData
         );
     }
 
@@ -242,8 +268,10 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
         uint liquidity,
         bytes memory data,
         uint minAmount,
+        address callback,
+        bytes memory callbackData,
         ArrayPermitParams calldata permit
-    ) external returns (uint amountOut) {
+    ) external returns (IPool.TokenAmount memory amountOut) {
         // Approve liquidity via permit.
         IBasePool(pool).permit2(
             msg.sender,
@@ -257,7 +285,9 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
             pool,
             liquidity,
             data,
-            minAmount
+            minAmount,
+            callback,
+            callbackData
         );
     }
 
@@ -265,11 +295,12 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
     function _swap(
         SwapPath[] memory paths,
         uint amountOutMin
-    ) private returns (uint amountOut) {
+    ) private returns (IPool.TokenAmount memory amountOut) {
         uint pathsLength = paths.length;
 
         SwapPath memory path;
         SwapStep memory step;
+        IPool.TokenAmount memory tokenAmount;
         uint stepsLength;
         uint j;
 
@@ -286,11 +317,17 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
             for (j = 0; j < stepsLength; ) {
                 if (j == stepsLength - 1) {
                     // Accumulate output amount at the last step.
-                    amountOut += IBasePool(step.pool).swap(step.data, msg.sender);
+                    tokenAmount = IBasePool(step.pool).swap(
+                        step.data, msg.sender, step.callback, step.callbackData
+                    );
+
+                    amountOut.token = tokenAmount.token;
+                    amountOut.amount += tokenAmount.amount;
+
                     break;
                 } else {
                     // Swap and send tokens to the next step.
-                    IBasePool(step.pool).swap(step.data, msg.sender);
+                    IBasePool(step.pool).swap(step.data, msg.sender, step.callback, step.callbackData);
 
                     // Cache the next step.
                     step = path.steps[j + 1];
@@ -306,7 +343,7 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
             }
         }
 
-        if (amountOut < amountOutMin) {
+        if (amountOut.amount < amountOutMin) {
             revert TooLittleReceived();
         }
     }
@@ -315,7 +352,7 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
         SwapPath[] memory paths,
         uint amountOutMin,
         uint deadline
-    ) external payable ensure(deadline) returns (uint amountOut) {
+    ) external payable ensure(deadline) returns (IPool.TokenAmount memory amountOut) {
         amountOut = _swap(
             paths,
             amountOutMin
@@ -327,7 +364,7 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
         uint amountOutMin,
         uint deadline,
         SplitPermitParams calldata permit
-    ) external payable ensure(deadline) returns (uint amountOut) {
+    ) external payable ensure(deadline) returns (IPool.TokenAmount memory amountOut) {
         // Approve input tokens via permit.
         IERC20Permit(permit.token).permit(
             msg.sender,
