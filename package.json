@@ -1,11 +1,11 @@
 {
-  "name": "@syncswap/contracts",
-  "description": "Smart contracts for the SyncSwap protocol",
+  "name": "@syncswap/core-contracts",
+  "description": "Core smart contracts of the SyncSwap protocol",
   "version": "1.0.0",
   "homepage": "https://syncswap.xyz",
   "repository": {
     "type": "git",
-    "url": "https://github.com/syncswap/contracts"
+    "url": "https://github.com/syncswap/core-contracts"
   },
   "keywords": [
     "syncswap",
@@ -35,15 +35,15 @@
     "mocha": "^10.0.0",
     "ts-node": "^10.7.0",
     "typescript": "^4.6.2",
-    "zksync-web3": "^0.13.4"
+    "zksync-web3": "^0.13.4",
+    "hardhat-gas-reporter": "^1.0.9"
   },
   "scripts": {
     "build": "yarn hardhat compile",
-    "build-zk": "yarn hardhat compile --network zkTestnet",
+    "build-zk": "yarn hardhat compile --network zkSyncTestnet",
+    "deploy-zksync-testnet": "yarn hardhat deploy-zksync --script deployTestnet.ts --network zkSyncTestnet",
+    "deploy-zksync-mainnet": "yarn hardhat deploy-zksync --script deployMainnet.ts --network zkSyncMainnet",
     "compile": "yarn hardhat compile",
     "test": "yarn hardhat test"
-  },
-  "dependencies": {
-    "hardhat-gas-reporter": "^1.0.9"
   }
 }

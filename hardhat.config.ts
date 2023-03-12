@@ -16,15 +16,7 @@ module.exports = {
     },
   },
 
-  // hardhat-zksync-deploy
-  // Run `deploy-zksync` task to deploy zkSync artifacts into following network.
-  // Note that it will use `artifacts` instead of `artifacts-zk`.
-  zkSyncDeploy: {
-    zkSyncNetwork: "https://zksync2-testnet.zksync.dev",
-    ethNetwork: "goerli",
-  },
-
-  // The compiler configuration for normal artifacts.
+  // The compiler configuration for default artifacts.
   solidity: {
     version: "0.8.15",
     settings: {
@@ -45,11 +37,8 @@ module.exports = {
     artifacts: "./artifacts"
   },
 
-  // tests
   defaultNetwork: 'hardhat',
   networks: {
-    // Run compile task with this network to generate normal artifacts.
-    // Example: `yarn hardhat compile --network hardhat`
     hardhat: {
       chainId: 280,
       gasMultiplier: 0,
@@ -60,13 +49,25 @@ module.exports = {
       url: "https://endpoints.omniatech.io/v1/eth/goerli/public"
     },
 
-    // Run compile task with this network to generate `artifacts-zk` and `cache-zk`.
-    // Example: `yarn hardhat compile --network zksync`
-    zkTestnet: {
+    mainnet: {
+      url: "https://eth.llamarpc.com"
+    },
+
+    zkSyncTestnet: {
       zksync: true,
+      // URL of the Ethereum Web3 RPC, or the identifier of the network (e.g. `mainnet` or `goerli`)
       ethNetwork: "goerli",
+      // URL of the zkSync network RPC
       url: 'https://zksync2-testnet.zksync.dev',
-      chainId: 280
+      // Verification endpoint for Goerli
+      verifyURL: 'https://testnet-explorer.zksync.dev/contract_verification'
+    },
+
+    zkSyncMainnet: {
+      zksync: true,
+      ethNetwork: "mainnet",
+      url: 'https://zksync2-mainnet.zksync.io',
+      verifyURL: 'https://explorer.zksync.io/contract_verification'
     },
   },
   mocha: {
