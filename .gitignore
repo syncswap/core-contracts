@@ -1,14 +1,12 @@
 # node packages
 node_modules/
 
-# build binaries
+# builds
 artifacts/
 artifacts-zk/
-artifacts-normal/
 
 cache/
 cache-zk/
-cache-normal/
 
 bin/
 
@@ -23,6 +21,4 @@ yarn-error.log
 
 # workspace
 misc/
-deploy/
-deploy-zksync.sh
-contracts/test/
+flatten/
