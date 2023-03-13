@@ -318,7 +318,7 @@ describe('Stable Pool', () => {
   });
 
   beforeEach(async () => {
-    const fixture = await stablePoolFixture(wallet, other.address);
+    const fixture = await stablePoolFixture(wallet);
     weth = fixture.weth;
     vault = fixture.vault;
     master = fixture.master;

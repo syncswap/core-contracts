@@ -1,5 +1,5 @@
 import { BigNumber, Contract } from 'ethers';
-import { expandTo18Decimals, MAX_UINT256, ZERO_ADDRESS } from './utilities';
+import { expandTo18Decimals, MAX_UINT256, ZERO, ZERO_ADDRESS } from './utilities';
 import { HardhatRuntimeEnvironment } from 'hardhat/types';
 import { HardhatEthersHelpers } from '@nomiclabs/hardhat-ethers/types';
 import { SignerWithAddress } from '@nomiclabs/hardhat-ethers/signers';
@@ -29,13 +29,33 @@ export async function deployFeeManager(feeRecipient: string): Promise<Contract> 
     return contract;
 }
 
-export async function deployPoolMaster(vault: string, feeRecipient: string): Promise<[Contract, Contract]> {
-    const forwarderRegistry = await deployForwarderRegistry();
-    const feeManager = await deployFeeManager(feeRecipient);
-    const contractFactory = await ethers.getContractFactory('SyncSwapPoolMaster');
-    const contract = await contractFactory.deploy(vault, forwarderRegistry.address, feeManager.address);
+export async function deployFeeRegistry(master: string): Promise<Contract> {
+    const contractFactory = await ethers.getContractFactory('FeeRegistry');
+    const contract = await contractFactory.deploy(master);
     await contract.deployed();
-    return [contract, feeManager];
+    return contract;
+}
+
+export async function deployFeeRecipient(feeRegistry: string): Promise<Contract> {
+    const contractFactory = await ethers.getContractFactory('SyncSwapFeeRecipient');
+    const contract = await contractFactory.deploy(feeRegistry);
+    await contract.deployed();
+    return contract;
+}
+
+export async function deployPoolMaster(vault: string): Promise<[Contract, Contract]> {
+    const forwarderRegistry = await deployForwarderRegistry();
+
+    const contractFactory = await ethers.getContractFactory('SyncSwapPoolMaster');
+    const master = await contractFactory.deploy(vault, forwarderRegistry.address, ZERO_ADDRESS);
+
+    const feeRegistry = await deployFeeRegistry(master.address);
+    const feeRecipient = await deployFeeRecipient(feeRegistry.address);
+    const feeManager = await deployFeeManager(feeRecipient.address);
+    await master.setFeeManager(feeManager.address);
+
+    await master.deployed();
+    return [master, feeManager];
 }
 
 export async function deployClassicPoolFactory(master: Contract): Promise<Contract> {
@@ -77,14 +97,13 @@ interface PoolFixture {
 
 export async function classicPoolFixture(
     wallet: SignerWithAddress,
-    feeRecipient: string,
     deflating0: boolean,
     deflating1: boolean,
 ): Promise<PoolFixture> {
     const weth = await deployWETH9();
     const vault = await deployVault(weth.address);
 
-    const [master, feeManager] = await deployPoolMaster(vault.address, feeRecipient);
+    const [master, feeManager] = await deployPoolMaster(vault.address);
     feeManager.setDefaultSwapFee(1, 300); // Set fee to 0.3% for testing
     const factory = await deployClassicPoolFactory(master);
 
@@ -105,13 +124,12 @@ export async function classicPoolFixture(
 }
 
 export async function stablePoolFixture(
-    wallet: SignerWithAddress,
-    feeRecipient: string
+    wallet: SignerWithAddress
 ): Promise<PoolFixture> {
     const weth = await deployWETH9();
     const vault = await deployVault(weth.address);
 
-    const [master, feeManager] = await deployPoolMaster(vault.address, feeRecipient);
+    const [master, feeManager] = await deployPoolMaster(vault.address);
     feeManager.setDefaultSwapFee(2, 100); // Set fee to 0.1% for testing
     const factory = await deployStablePoolFactory(master);
 
@@ -190,7 +208,7 @@ export async function routerFixture(): Promise<V2Fixture> {
 
     // deploy core
     const vault = await deployVault(WETH.address);
-    const [master, feeManager] = await deployPoolMaster(vault.address, accounts[1].address);
+    const [master, feeManager] = await deployPoolMaster(vault.address);
     const classicFactory = await deployClassicPoolFactory(master);
     const stableFactory = await deployStablePoolFactory(master);
 

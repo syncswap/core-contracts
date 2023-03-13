@@ -313,7 +313,7 @@ describe('Classic Pool', () => {
   });
 
   beforeEach(async () => {
-    const fixture = await classicPoolFixture(wallet, other.address, false, false);
+    const fixture = await classicPoolFixture(wallet, false, false);
     weth = fixture.weth;
     vault = fixture.vault;
     master = fixture.master;

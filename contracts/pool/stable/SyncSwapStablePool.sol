@@ -12,6 +12,7 @@ import "../../interfaces/ICallback.sol";
 import "../../interfaces/vault/IVault.sol";
 import "../../interfaces/pool/IStablePool.sol";
 import "../../interfaces/master/IPoolMaster.sol";
+import "../../interfaces/master/IFeeRecipient.sol";
 import "../../interfaces/factory/IPoolFactory.sol";
 
 error Overflow();
@@ -442,6 +443,10 @@ contract SyncSwapStablePool is IStablePool, ERC20Permit2, ReentrancyGuard {
 
                     if (_liquidity != 0) {
                         _mint(_feeRecipient, _liquidity);
+
+                        // Notifies the fee recipient.
+                        IFeeRecipient(_feeRecipient).notifyFees(2, address(this), _liquidity, _protocolFee, '');
+
                         _totalSupply += _liquidity; // update cached value.
                     }
                 }

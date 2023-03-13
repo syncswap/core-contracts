@@ -3,6 +3,7 @@
 pragma solidity ^0.8.0;
 
 import "../interfaces/token/IERC20.sol";
+import "../interfaces/master/IFeeRecipient.sol";
 import "../interfaces/vault/IVault.sol";
 import "../interfaces/vault/IFlashLoanRecipient.sol";
 
@@ -64,7 +65,9 @@ abstract contract VaultFlashLoans is IVault, ReentrancyGuard, Pausable {
 
     function _payFeeAmount(address token, uint amount) internal {
         if (amount != 0) {
-            TransferHelper.safeTransfer(token, flashLoanFeeRecipient, amount);
+            address _flashLoanFeeRecipient = flashLoanFeeRecipient;
+            TransferHelper.safeTransfer(token, _flashLoanFeeRecipient, amount);
+            IFeeRecipient(_flashLoanFeeRecipient).notifyFees(10, token, amount, flashLoanFeePercentage, '');
         }
     }
 

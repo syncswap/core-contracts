@@ -67,7 +67,7 @@ module.exports = {
       zksync: true,
       ethNetwork: "mainnet",
       url: 'https://zksync2-mainnet.zksync.io',
-      verifyURL: 'https://explorer.zksync.io/contract_verification'
+      verifyURL: 'https://zksync2-mainnet-explorer.zksync.io/contract_verification'
     },
   },
   mocha: {

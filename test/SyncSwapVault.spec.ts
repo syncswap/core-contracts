@@ -43,7 +43,7 @@ describe('SyncSwapVault', () => {
 
   it('Should receive and deposit some ERC20 tokens', async () => {
     expect(vault.transferAndDeposit(token.address, wallet.address, TEST_AMOUNT))
-      .to.be.revertedWith('0x7939f424'); // TransferFromFailed()
+      .to.be.revertedWith('TransferFromFailed()');
 
     const balanceBefore = await token.balanceOf(wallet.address);
 
@@ -54,7 +54,7 @@ describe('SyncSwapVault', () => {
     expect(await token.balanceOf(wallet.address)).to.eq(balanceBefore.sub(TEST_AMOUNT));
 
     expect(vault.transferAndDeposit(token.address, wallet.address, '1'))
-      .to.be.revertedWith('0x7939f424'); // TransferFromFailed()
+      .to.be.revertedWith('TransferFromFailed()');
   });
 
   it('Should deposit some ETH', async () => {
