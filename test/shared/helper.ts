@@ -160,7 +160,7 @@ async function getToken(tokenAddress: string): Promise<Contract> {
 
 export async function getSwapFee(pool: Contract, sender: string): Promise<BigNumber> {
   const master = await getPoolMaster(await pool.master());
-  return BigNumber.from(await master.getSwapFee(pool.address, sender));
+  return BigNumber.from(await master.getSwapFee(pool.address, sender, ZERO_ADDRESS, ZERO_ADDRESS, "0x"));
 }
 
 export async function calculateLiquidityToMint(

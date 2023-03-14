@@ -108,7 +108,7 @@ contract SyncSwapClassicPool is IClassicPool, ERC20Permit2, ReentrancyGuard {
 
         // Gets swap fee for the sender.
         _sender = _getVerifiedSender(_sender);
-        uint _amount1Optimal = (params.amount0 * params.reserve1) / params.reserve0;
+        uint _amount1Optimal = params.reserve0 == 0 ? 0 : (params.amount0 * params.reserve1) / params.reserve0;
         bool _swap0For1 = params.amount1 < _amount1Optimal;
         if (_swap0For1) {
             params.swapFee = _getSwapFee(_sender, token0, token1);
