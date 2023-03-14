@@ -24,8 +24,14 @@ abstract contract BasePoolFactory is IBasePoolFactory {
         deployData = cachedDeployData;
     }
 
-    function getSwapFee(address pool, address sender) external view override returns (uint24 swapFee) {
-        swapFee = IPoolMaster(master).getSwapFee(pool, sender);
+    function getSwapFee(
+        address pool,
+        address sender,
+        address tokenIn,
+        address tokenOut,
+        bytes calldata data
+    ) external view override returns (uint24 swapFee) {
+        swapFee = IPoolMaster(master).getSwapFee(pool, sender, tokenIn, tokenOut, data);
     }
 
     function createPool(bytes calldata data) external override returns (address pool) {

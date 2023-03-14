@@ -21,7 +21,7 @@ interface IPool {
     function getAssets() external view returns (address[] memory assets);
 
     /// @dev Returns the swap fee of the pool.
-    function getSwapFee(address sender) external view returns (uint24 swapFee);
+    function getSwapFee(address sender, address tokenIn, address tokenOut, bytes calldata data) external view returns (uint24 swapFee);
 
     /// @dev Returns the protocol fee of the pool.
     function getProtocolFee() external view returns (uint24 protocolFee);

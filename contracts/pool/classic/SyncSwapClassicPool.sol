@@ -108,10 +108,16 @@ contract SyncSwapClassicPool is IClassicPool, ERC20Permit2, ReentrancyGuard {
 
         // Gets swap fee for the sender.
         _sender = _getVerifiedSender(_sender);
-        params.swapFee = getSwapFee(_sender);
+        uint _amount1Optimal = (params.amount0 * params.reserve1) / params.reserve0;
+        bool _swap0For1 = params.amount1 < _amount1Optimal;
+        if (_swap0For1) {
+            params.swapFee = _getSwapFee(_sender, token0, token1);
+        } else {
+            params.swapFee = _getSwapFee(_sender, token1, token0);
+        }
 
         // Adds mint fee to reserves (applies to invariant increase) if unbalanced.
-        (params.fee0, params.fee1) = _unbalancedMintFee(params.swapFee, params.amount0, params.amount1, params.reserve0, params.reserve1);
+        (params.fee0, params.fee1) = _unbalancedMintFee(params.swapFee, params.amount0, params.amount1, _amount1Optimal, params.reserve0, params.reserve1);
         params.reserve0 += params.fee0;
         params.reserve1 += params.fee1;
 
@@ -242,12 +248,13 @@ contract SyncSwapClassicPool is IClassicPool, ERC20Permit2, ReentrancyGuard {
 
         // Gets swap fee for the sender.
         _sender = _getVerifiedSender(_sender);
-        params.swapFee = getSwapFee(_sender);
 
         // Swaps one token for another, transfers desired tokens, and update context values.
         /// @dev Calculate `amountOut` as if the user first withdrew balanced liquidity and then swapped from one token for another.
         if (params.tokenOut == token1) {
             // Swaps `token0` for `token1`.
+            params.swapFee = _getSwapFee(_sender, token0, token1);
+
             params.tokenIn = token0;
             (params.amountSwapped, params.feeIn) = _getAmountOut(
                 params.swapFee, params.amount0, params.balance0 - params.amount0, params.balance1 - params.amount1, true
@@ -261,6 +268,8 @@ contract SyncSwapClassicPool is IClassicPool, ERC20Permit2, ReentrancyGuard {
         } else {
             // Swaps `token1` for `token0`.
             //require(_tokenOut == token0);
+            params.swapFee = _getSwapFee(_sender, token1, token0);
+
             params.tokenIn = token1;
             (params.amountSwapped, params.feeIn) = _getAmountOut(
                 params.swapFee, params.amount1, params.balance0 - params.amount0, params.balance1 - params.amount1, false
@@ -310,10 +319,11 @@ contract SyncSwapClassicPool is IClassicPool, ERC20Permit2, ReentrancyGuard {
 
         // Gets swap fee for the sender.
         _sender = _getVerifiedSender(_sender);
-        params.swapFee = getSwapFee(_sender);
 
         // Calculates output amount, update context values and emit event.
         if (params.tokenIn == token0) {
+            params.swapFee = _getSwapFee(_sender, token0, token1);
+
             params.tokenOut = token1;
             params.amountIn = params.balance0 - params.reserve0;
 
@@ -323,6 +333,8 @@ contract SyncSwapClassicPool is IClassicPool, ERC20Permit2, ReentrancyGuard {
             emit Swap(msg.sender, params.amountIn, 0, 0, params.amountOut, params.to);
         } else {
             //require(params.tokenIn == token1);
+            params.swapFee = _getSwapFee(_sender, token1, token0);
+
             params.tokenOut = token0;
             params.amountIn = params.balance1 - params.reserve1;
 
@@ -359,9 +371,13 @@ contract SyncSwapClassicPool is IClassicPool, ERC20Permit2, ReentrancyGuard {
         _tokenAmount.amount = params.amountOut;
     }
 
+    function _getSwapFee(address _sender, address _tokenIn, address _tokenOut) private view returns (uint24 _swapFee) {
+        _swapFee = getSwapFee(_sender, _tokenIn, _tokenOut, "");
+    }
+
     /// @dev This function doesn't check the forwarder.
-    function getSwapFee(address _sender) public view override returns (uint24 _swapFee) {
-        _swapFee = IPoolMaster(master).getSwapFee(address(this), _sender);
+    function getSwapFee(address _sender, address _tokenIn, address _tokenOut, bytes memory data) public view override returns (uint24 _swapFee) {
+        _swapFee = IPoolMaster(master).getSwapFee(address(this), _sender, _tokenIn, _tokenOut, data);
     }
 
     function getProtocolFee() public view override returns (uint24 _protocolFee) {
@@ -391,13 +407,13 @@ contract SyncSwapClassicPool is IClassicPool, ERC20Permit2, ReentrancyGuard {
         uint _swapFee,
         uint _amount0,
         uint _amount1,
+        uint _amount1Optimal,
         uint _reserve0,
         uint _reserve1
     ) private pure returns (uint _token0Fee, uint _token1Fee) {
-        if (_reserve0 == 0 || _reserve1 == 0) {
+        if (_reserve0 == 0) {
             return (0, 0);
         }
-        uint _amount1Optimal = (_amount0 * _reserve1) / _reserve0;
         if (_amount1 >= _amount1Optimal) {
             _token1Fee = (_swapFee * (_amount1 - _amount1Optimal)) / (2 * MAX_FEE);
         } else {
@@ -430,7 +446,7 @@ contract SyncSwapClassicPool is IClassicPool, ERC20Permit2, ReentrancyGuard {
                         _mint(_feeRecipient, _liquidity);
 
                         // Notifies the fee recipient.
-                        IFeeRecipient(_feeRecipient).notifyFees(1, address(this), _liquidity, _protocolFee, '');
+                        IFeeRecipient(_feeRecipient).notifyFees(1, address(this), _liquidity, _protocolFee, "");
 
                         _totalSupply += _liquidity; // update cached value.
                     }
@@ -448,12 +464,16 @@ contract SyncSwapClassicPool is IClassicPool, ERC20Permit2, ReentrancyGuard {
 
     function getAmountOut(address _tokenIn, uint _amountIn, address _sender) external view override returns (uint _amountOut) {
         (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
-        (_amountOut,) = _getAmountOut(getSwapFee(_sender), _amountIn, _reserve0, _reserve1, _tokenIn == token0);
+        bool _swap0For1 = _tokenIn == token0;
+        address _tokenOut = _swap0For1 ? token1 : token0;
+        (_amountOut,) = _getAmountOut(_getSwapFee(_sender, _tokenIn, _tokenOut), _amountIn, _reserve0, _reserve1, _swap0For1);
     }
 
     function getAmountIn(address _tokenOut, uint _amountOut, address _sender) external view override returns (uint _amountIn) {
         (uint _reserve0, uint _reserve1) = (reserve0, reserve1);
-        _amountIn = _getAmountIn(getSwapFee(_sender), _amountOut, _reserve0, _reserve1, _tokenOut == token0);
+        bool _swap1For0 = _tokenOut == token0;
+        address _tokenIn = _swap1For0 ? token1 : token0;
+        _amountIn = _getAmountIn(_getSwapFee(_sender, _tokenIn, _tokenOut), _amountOut, _reserve0, _reserve1, _swap1For0);
     }
 
     function _getAmountOut(

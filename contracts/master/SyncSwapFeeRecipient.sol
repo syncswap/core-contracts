@@ -43,6 +43,10 @@ contract SyncSwapFeeRecipient is IFeeRecipient, Ownable2Step {
         return feeTokens[epoch].length;
     }
 
+    function feeDistributorsLength() external view returns (uint) {
+        return feeDistributors.length;
+    }
+
     function getEpochStart(uint ts) public pure returns (uint) {
         return ts - (ts % EPOCH_DURATION);
     }

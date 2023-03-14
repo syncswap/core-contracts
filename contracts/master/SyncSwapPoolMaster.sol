@@ -72,8 +72,14 @@ contract SyncSwapPoolMaster is IPoolMaster, Ownable2Step {
 
     // Fees
 
-    function getSwapFee(address pool, address sender) external view override returns (uint24 fee) {
-        fee = IFeeManager(feeManager).getSwapFee(pool, sender);
+    function getSwapFee(
+        address pool,
+        address sender,
+        address tokenIn,
+        address tokenOut,
+        bytes calldata data
+    ) external view override returns (uint24 fee) {
+        fee = IFeeManager(feeManager).getSwapFee(pool, sender, tokenIn, tokenOut, data);
     }
 
     function getProtocolFee(address pool) external view override returns (uint24 fee) {

@@ -52,7 +52,13 @@ contract SyncSwapFeeManager is IFeeManager, Ownable {
 
     // Getters
 
-    function getSwapFee(address pool, address /*sender*/) external view override returns (uint24 fee) {
+    function getSwapFee(
+        address pool,
+        address /*sender*/,
+        address /*tokenIn*/,
+        address /*tokenOut*/,
+        bytes calldata /*data*/
+    ) external view override returns (uint24 fee) {
         fee = poolSwapFee[pool];
 
         if (fee == 0) {
