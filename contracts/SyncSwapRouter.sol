@@ -38,6 +38,9 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
     address public immutable wETH;
     address private constant NATIVE_ETH = address(0);
 
+    mapping(address => mapping(address => bool)) public isPoolEntered;
+    mapping(address => address[]) public enteredPools;
+
     modifier ensure(uint deadline) {
         // solhint-disable-next-line not-rely-on-time
         if (block.timestamp > deadline) {
@@ -49,6 +52,10 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
     constructor(address _vault, address _wETH) {
         vault = _vault;
         wETH = _wETH;
+    }
+
+    function enteredPoolsLength(address account) external view returns (uint) {
+        return enteredPools[account].length;
     }
 
     // Add Liquidity
@@ -95,13 +102,21 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
         }
     }
 
+    function _markPoolEntered(address pool) private {
+        if (!isPoolEntered[pool][msg.sender]) {
+            isPoolEntered[pool][msg.sender] = true;
+            enteredPools[msg.sender].push(pool);
+        }
+    }
+
     function addLiquidity(
         address pool,
         TokenInput[] calldata inputs,
         bytes calldata data,
         uint minLiquidity,
         address callback,
-        bytes calldata callbackData
+        bytes calldata callbackData,
+        bool markEntered
     ) external payable returns (uint liquidity) {
         liquidity = _transferAndAddLiquidity(
             pool,
@@ -111,6 +126,10 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
             callback,
             callbackData
         );
+
+        if (markEntered) {
+            _markPoolEntered(pool);
+        }
     }
 
     function addLiquidityWithPermit(
@@ -120,8 +139,9 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
         uint minLiquidity,
         address callback,
         bytes calldata callbackData,
-        SplitPermitParams[] memory permits
-    ) external payable returns (uint liquidity) {
+        SplitPermitParams[] memory permits,
+        bool markEntered
+    ) public payable returns (uint liquidity) {
         // Approve all tokens via permit.
         uint n = permits.length;
 
@@ -153,6 +173,10 @@ contract SyncSwapRouter is IRouter, SelfPermit, Multicall {
             callback,
             callbackData
         );
+
+        if (markEntered) {
+            _markPoolEntered(pool);
+        }
     }
 
     // Burn Liquidity
