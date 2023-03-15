@@ -98,6 +98,7 @@ contract SyncSwapPoolMaster is IPoolMaster, Ownable2Step {
     // Factories
 
     function setFactoryWhitelisted(address factory, bool whitelisted) external override onlyOwner {
+        require(factory != address(0), "Invalid factory");
         isFactoryWhitelisted[factory] = whitelisted;
         emit SetFactoryWhitelisted(factory, whitelisted);
     }

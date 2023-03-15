@@ -110,6 +110,7 @@ contract SyncSwapFeeRecipient is IFeeRecipient, Ownable2Step {
 
     /// @dev Adds a new fee distributor.
     function addFeeDistributor(address distributor) external onlyOwner {
+        require(distributor != address(0), "Invalid address");
         require(!isFeeDistributor[distributor], "Already set");
         isFeeDistributor[distributor] = true;
         feeDistributors.push(distributor);
