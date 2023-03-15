@@ -18,13 +18,14 @@ contract ForwarderRegistry is IForwarderRegistry, Ownable {
     }
 
     function addForwarder(address forwarder) external onlyOwner {
-        require(!_isForwarder[forwarder], "ALREADY_ADDED");
+        require(forwarder != address(0), "Invalid address");
+        require(!_isForwarder[forwarder], "Already added");
         _isForwarder[forwarder] = true;
         emit AddForwarder(forwarder);
     }
 
     function removeForwarder(address forwarder) external onlyOwner {
-        require(_isForwarder[forwarder], "NOT_FORWARDER");
+        require(_isForwarder[forwarder], "Not added");
         delete _isForwarder[forwarder];
         emit RemoveForwarder(forwarder);
     }

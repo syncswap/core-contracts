@@ -27,6 +27,7 @@ contract FeeRegistry is IFeeRegistry, Ownable {
 
     /// @dev Whitelists a fee sender explicitly.
     function setSenderWhitelisted(address sender, bool isWhitelisted) external onlyOwner {
+        require(sender != address(0), "Invalid address");
         require(isSenderWhitelisted[sender] != isWhitelisted, "Already set");
         isSenderWhitelisted[sender] = isWhitelisted;
         emit SetSenderWhitelisted(sender, isWhitelisted);

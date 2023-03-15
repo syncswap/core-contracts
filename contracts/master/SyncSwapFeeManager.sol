@@ -91,7 +91,7 @@ contract SyncSwapFeeManager is IFeeManager, Ownable {
     function setDefaultSwapFee(uint16 poolType, uint24 fee) external onlyOwner {
         require(
             fee <= MAX_SWAP_FEE,
-            "INVALID_FEE"
+            "Invalid fee"
         );
         defaultSwapFee[poolType] = fee;
         emit SetDefaultSwapFee(poolType, fee);
@@ -101,7 +101,7 @@ contract SyncSwapFeeManager is IFeeManager, Ownable {
         require(
             fee == ZERO_CUSTOM_FEE ||
             fee <= MAX_SWAP_FEE,
-            "INVALID_FEE"
+            "Invalid fee"
         );
         poolSwapFee[pool] = fee;
         emit SetPoolSwapFee(pool, fee);
@@ -110,7 +110,7 @@ contract SyncSwapFeeManager is IFeeManager, Ownable {
     function setDefaultProtocolFee(uint16 poolType, uint24 fee) external onlyOwner {
         require(
             fee <= MAX_PROTOCOL_FEE,
-            "INVALID_FEE"
+            "Invalid fee"
         );
         defaultProtocolFee[poolType] = fee;
         emit SetDefaultProtocolFee(poolType, fee);
@@ -120,7 +120,7 @@ contract SyncSwapFeeManager is IFeeManager, Ownable {
         require(
             fee == ZERO_CUSTOM_FEE ||
             fee <= MAX_PROTOCOL_FEE,
-            "INVALID_FEE"
+            "Invalid fee"
         );
         poolProtocolFee[pool] = fee;
         emit SetPoolProtocolFee(pool, fee);
