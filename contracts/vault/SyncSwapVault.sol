@@ -30,13 +30,13 @@ contract SyncSwapVault is VaultFlashLoans {
         }
     }
 
-    function balanceOf(address token, address owner) external view override returns (uint balance) {
+    function balanceOf(address token, address account) external view override returns (uint balance) {
         // Ensure the same `balances` as native ETH.
         if (token == wETH) {
             token = NATIVE_ETH;
         }
 
-        return balances[token][owner];
+        return balances[token][account];
     }
 
     // Deposit

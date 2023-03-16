@@ -47,7 +47,7 @@ contract SyncSwapPoolMaster is IPoolMaster, Ownable2Step {
     /// @dev Pools by hash of its config.
     mapping(bytes32 => address) public override getPool;
 
-    address[] public pools;
+    address[] public override pools;
 
     constructor(address _vault, address _forwarderRegistry, address _feeManager) {
         vault = _vault;

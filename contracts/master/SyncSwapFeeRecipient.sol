@@ -58,7 +58,7 @@ contract SyncSwapFeeRecipient is IFeeRecipient, Ownable2Step {
         uint amount,
         uint feeRate,
         bytes calldata /*data*/
-    ) external {
+    ) external override {
         if (!IFeeRegistry(feeRegistry).isFeeSender(msg.sender)) {
             revert InvalidFeeSender();
         }

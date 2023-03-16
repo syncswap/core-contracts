@@ -67,7 +67,7 @@ abstract contract VaultFlashLoans is IVault, ReentrancyGuard, Pausable {
         if (amount != 0) {
             address _flashLoanFeeRecipient = flashLoanFeeRecipient;
             TransferHelper.safeTransfer(token, _flashLoanFeeRecipient, amount);
-            IFeeRecipient(_flashLoanFeeRecipient).notifyFees(10, token, amount, flashLoanFeePercentage, '');
+            IFeeRecipient(_flashLoanFeeRecipient).notifyFees(10, token, amount, flashLoanFeePercentage, "");
         }
     }
 
