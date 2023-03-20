@@ -32,18 +32,24 @@
     "ethereumjs-util": "^7.1.4",
     "ethers": "^5.6.1",
     "hardhat": "^2.12.7",
+    "hardhat-gas-reporter": "^1.0.9",
     "mocha": "^10.0.0",
     "ts-node": "^10.7.0",
     "typescript": "^4.6.2",
-    "zksync-web3": "^0.13.4",
-    "hardhat-gas-reporter": "^1.0.9"
+    "zksync-web3": "^0.13.4"
   },
   "scripts": {
     "build": "yarn hardhat compile",
     "build-zk": "yarn hardhat compile --network zkSyncTestnet",
     "deploy-zksync-testnet": "yarn hardhat deploy-zksync --script deployTestnet.ts --network zkSyncTestnet",
     "deploy-zksync-mainnet": "yarn hardhat deploy-zksync --script deployMainnet.ts --network zkSyncMainnet",
+    "deploy-scroll-testnet": "yarn hardhat run --network scrollTestnet deploy/deployScrollTestnet.ts",
+    "deploy-polygon-testnet": "yarn hardhat run --network polygonTestnet deploy/deployPolygonTestnet.ts",
     "compile": "yarn hardhat compile",
     "test": "yarn hardhat test"
+  },
+  "dependencies": {
+    "dotenv": "^16.0.3",
+    "hardhat-deploy": "^0.11.25"
   }
 }

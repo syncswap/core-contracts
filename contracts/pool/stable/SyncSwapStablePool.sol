@@ -501,25 +501,23 @@ contract SyncSwapStablePool is IStablePool, ERC20Permit2, ReentrancyGuard {
         if (_amountIn == 0) {
             _dy = 0;
         } else {
-            unchecked {
-                uint _adjustedReserve0 = _reserve0 * token0PrecisionMultiplier;
-                uint _adjustedReserve1 = _reserve1 * token1PrecisionMultiplier;
+            uint _adjustedReserve0 = _reserve0 * token0PrecisionMultiplier;
+            uint _adjustedReserve1 = _reserve1 * token1PrecisionMultiplier;
 
-                _feeIn = (_amountIn * _swapFee) / MAX_FEE;
-                uint _feeDeductedAmountIn = _amountIn - _feeIn;
-                uint _d = StableMath.computeDFromAdjustedBalances(_adjustedReserve0, _adjustedReserve1);
+            _feeIn = (_amountIn * _swapFee) / MAX_FEE;
+            uint _feeDeductedAmountIn = _amountIn - _feeIn;
+            uint _d = StableMath.computeDFromAdjustedBalances(_adjustedReserve0, _adjustedReserve1);
 
-                if (_token0In) {
-                    uint _x = _adjustedReserve0 + (_feeDeductedAmountIn * token0PrecisionMultiplier);
-                    uint _y = StableMath.getY(_x, _d);
-                    _dy = _adjustedReserve1 - _y - 1;
-                    _dy /= token1PrecisionMultiplier;
-                } else {
-                    uint _x = _adjustedReserve1 + (_feeDeductedAmountIn * token1PrecisionMultiplier);
-                    uint _y = StableMath.getY(_x, _d);
-                    _dy = _adjustedReserve0 - _y - 1;
-                    _dy /= token0PrecisionMultiplier;
-                }
+            if (_token0In) {
+                uint _x = _adjustedReserve0 + (_feeDeductedAmountIn * token0PrecisionMultiplier);
+                uint _y = StableMath.getY(_x, _d);
+                _dy = _adjustedReserve1 - _y - 1;
+                _dy /= token1PrecisionMultiplier;
+            } else {
+                uint _x = _adjustedReserve1 + (_feeDeductedAmountIn * token1PrecisionMultiplier);
+                uint _y = StableMath.getY(_x, _d);
+                _dy = _adjustedReserve0 - _y - 1;
+                _dy /= token0PrecisionMultiplier;
             }
         }
     }

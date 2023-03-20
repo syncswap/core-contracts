@@ -1,29 +1,27 @@
 import { HardhatRuntimeEnvironment } from "hardhat/types";
-import { deployContract, initializeWalletAndDeployer } from "../deploy-utils/helper";
+import { deployContract, initializeZkSyncWalletAndDeployer } from "../deploy-utils/helper";
 import { ZERO_ADDRESS } from "../test/shared/utilities";
 
 export default async function (hre: HardhatRuntimeEnvironment) {
-    initializeWalletAndDeployer(hre);
+    initializeZkSyncWalletAndDeployer(hre);
 
     const wETHAddress: string = '0x20b28B1e4665FFf290650586ad76E977EAb90c5D';
     //const feeRecipientAddress: string = createArgument(ArgumentTypes.ACCOUNT);
 
     // 1. Vault
-    const vaultAddress = '0x1b2966448791497D9fE66B2F46d0fD373Df42342'
+    const vaultAddress = '0x29B46ca1f2610019B01484d1aDf83a4f51bBCD9c'
 
     // 2. Forwarder Registry
-    const forwarderRegistryAddress = '0x6f7312e0592E69CdFe5406BFdF8166b080Ab73Ad'
+    const forwarderRegistryAddress = '0xA878b73Fb0fd1863D8EE5d2d30120E3F5a548993'
 
     // 3. Pool Master
-    const masterAddress = '0x744A255b2625ccf253a7f3a5ef47D6942Dc9170a'
+    const masterAddress = '0x716a8c2d07288EEeEf2151efC67a9b62F808b34a'
 
     // 4. Fee Registry
-    const feeRegistryAddress = '0xFA86895dcCd79CB1530C74fDa04211Ac37b24dC3'
+    const feeRegistryAddress = '0xCd89A32562df49A09B05f30F727B855BFC42661e'
 
     // 5. Fee Recipient
-    const feeRecipient = await deployContract('feeRecipient', 'SyncSwapFeeRecipient',
-        [feeRegistryAddress]
-    );
+    const feeRecipientAddress = '0x7C14dd69165B786D7040446A43088bD122505f83'
 
     // Done
     //console.log('Adding vault as fee sender...');
@@ -32,10 +30,9 @@ export default async function (hre: HardhatRuntimeEnvironment) {
 
     // 6. Fee Manager
     const feeManager = await deployContract('feeManager', 'SyncSwapFeeManager',
-        [feeRecipient.address]
+        [feeRecipientAddress]
     );
 
-    // Done
     //console.log('Initializing fee manager to master...');
     //await master.setFeeManager(feeManager.address);
     //console.log('Initialized fee manager to master.');

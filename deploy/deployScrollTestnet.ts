@@ -1,29 +1,28 @@
 import { HardhatRuntimeEnvironment } from "hardhat/types";
-import { deployContract, initializeZkSyncWalletAndDeployer } from "../deploy-utils/helper";
+import { ethers } from "hardhat";
 import { ZERO_ADDRESS } from "../test/shared/utilities";
+import { deployContractEth } from "../deploy-utils/helper";
 
-export default async function (hre: HardhatRuntimeEnvironment) {
-    initializeZkSyncWalletAndDeployer(hre);
-
-    const wETHAddress: string = '0x20b28B1e4665FFf290650586ad76E977EAb90c5D'; // zkSync Testnet WETH
+async function main() {
+    const wETHAddress: string = '0x7160570BB153Edd0Ea1775EC2b2Ac9b65F1aB61B'; // Scroll Testnet WETH
 
     // 1. Vault
-    const vault = await deployContract('vault', 'SyncSwapVault',
+    const vault = await deployContractEth('vault', 'SyncSwapVault',
         [wETHAddress],
     );
 
     // 2. Forwarder Registry
-    const forwarderRegistry = await deployContract('forwarderRegistry', 'ForwarderRegistry',
+    const forwarderRegistry = await deployContractEth('forwarderRegistry', 'ForwarderRegistry',
         []
     );
 
     // 3. Pool Master
-    const master = await deployContract('master', 'SyncSwapPoolMaster',
+    const master = await deployContractEth('master', 'SyncSwapPoolMaster',
         [vault.address, forwarderRegistry.address, ZERO_ADDRESS],
     );
 
     // 4. Fee Registry
-    const feeRegistry = await deployContract('feeRegistry', 'FeeRegistry',
+    const feeRegistry = await deployContractEth('feeRegistry', 'FeeRegistry',
         [master.address]
     );
 
@@ -32,12 +31,12 @@ export default async function (hre: HardhatRuntimeEnvironment) {
     console.log('Added vault as fee sender.');
 
     // 5. Fee Recipient
-    const feeRecipient = await deployContract('feeRecipient', 'SyncSwapFeeRecipient',
+    const feeRecipient = await deployContractEth('feeRecipient', 'SyncSwapFeeRecipient',
         [feeRegistry.address]
     );
 
     // 6. Fee Manager
-    const feeManager = await deployContract('feeManager', 'SyncSwapFeeManager',
+    const feeManager = await deployContractEth('feeManager', 'SyncSwapFeeManager',
         [feeRecipient.address]
     );
 
@@ -46,7 +45,7 @@ export default async function (hre: HardhatRuntimeEnvironment) {
     console.log('Initialized fee manager to master.');
 
     // 7. Classic Pool Factory
-    const classicFactory = await deployContract('classicPoolFactory', 'SyncSwapClassicPoolFactory',
+    const classicFactory = await deployContractEth('classicPoolFactory', 'SyncSwapClassicPoolFactory',
         [master.address],
     );
 
@@ -55,7 +54,7 @@ export default async function (hre: HardhatRuntimeEnvironment) {
     console.log('Whitelisted classic factory.');
 
     // 8. Stable Pool Factory
-    const stableFactory = await deployContract('stablePoolFactory', 'SyncSwapStablePoolFactory',
+    const stableFactory = await deployContractEth('stablePoolFactory', 'SyncSwapStablePoolFactory',
         [master.address],
     );
 
@@ -64,7 +63,7 @@ export default async function (hre: HardhatRuntimeEnvironment) {
     console.log('Whitelisted stable factory.');
 
     // 9. Router
-    const router = await deployContract('router', 'SyncSwapRouter',
+    const router = await deployContractEth('router', 'SyncSwapRouter',
         [vault.address, wETHAddress],
     );
 
@@ -72,3 +71,10 @@ export default async function (hre: HardhatRuntimeEnvironment) {
     await forwarderRegistry.addForwarder(router.address);
     console.log('Added router as forwarder.');
 }
+
+// We recommend this pattern to be able to use async/await everywhere
+// and properly handle errors.
+main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+});

@@ -1,5 +1,6 @@
 import { Deployer } from "@matterlabs/hardhat-zksync-deploy";
-import { Contract, ethers, Overrides } from "ethers";
+import { BytesLike, Contract, Overrides } from "ethers";
+import { ethers } from "hardhat";
 import { HardhatRuntimeEnvironment } from "hardhat/types";
 import { Wallet } from "zksync-web3";
 import * as secrets from "../secrets.json";
@@ -17,7 +18,7 @@ function _createWalletAndDeployer(
     return [wallet, new Deployer(hre, wallet)];
 }
 
-export function initializeWalletAndDeployer(
+export function initializeZkSyncWalletAndDeployer(
     hre: HardhatRuntimeEnvironment
 ): void {
     if (wallet === undefined || deployer === undefined) {
@@ -58,8 +59,8 @@ export async function deployContract(
     artifactName: string,
     constructorArguments: any[],
     overrides?: Overrides | undefined,
-    additionalFactoryDeps?: ethers.utils.BytesLike[] | undefined
-): Promise<ethers.Contract> {
+    additionalFactoryDeps?: BytesLike[] | undefined
+): Promise<Contract> {
     console.log(`\nDeploying contract '${contractName}' with arguments ${constructorArguments}`);
 
     const artifact = await deployer.loadArtifact(artifactName);
@@ -70,6 +71,28 @@ export async function deployContract(
             //feeToken: FEE_TOKEN,
         },
         additionalFactoryDeps
+    );
+
+    deployedContracts.set(contractName, contract);
+    await contract.deployed();
+    console.log(`Contract '${contractName}' deployed to ${contract.address}`);
+    
+    return contract;
+}
+
+export async function deployContractEth(
+    contractName: string,
+    artifactName: string,
+    constructorArguments: any[],
+    overrides?: Overrides | undefined,
+): Promise<Contract> {
+    console.log(`\nDeploying contract '${contractName}' with arguments ${constructorArguments}`);
+
+    const factory = await ethers.getContractFactory(artifactName);
+    const contract = await factory.deploy(
+        ...constructorArguments, {
+            ...overrides,
+        },
     );
 
     deployedContracts.set(contractName, contract);

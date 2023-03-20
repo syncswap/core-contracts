@@ -86,7 +86,7 @@ describe('SyncSwapStablePoolFactory', () => {
     );
     const tx = await master.createPool(factory.address, data);
     const receipt = await tx.wait();
-    expect(receipt.gasUsed).to.eq(4020464); // 2512920 for Uniswap V2
+    expect(receipt.gasUsed).to.eq(4042148); // 2512920 for Uniswap V2
   });
 
   /*

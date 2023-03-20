@@ -4,6 +4,7 @@ import "@matterlabs/hardhat-zksync-solc";
 import "@nomiclabs/hardhat-waffle";
 import "@nomiclabs/hardhat-solhint";
 import "hardhat-gas-reporter";
+require('dotenv').config()
 
 module.exports = {
   // hardhat-zksync-solc
@@ -69,6 +70,21 @@ module.exports = {
       url: 'https://zksync2-mainnet.zksync.io',
       verifyURL: 'https://zksync2-mainnet-explorer.zksync.io/contract_verification'
     },
+
+    baseGoerli: {
+      url: "https://goerli.base.org",
+      accounts: process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
+    },
+
+    scrollTestnet: {
+      url: "https://alpha-rpc.scroll.io/l2",
+      accounts: process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
+    },
+
+    polygonTestnet: {
+      url: "https://rpc.public.zkevm-test.net",
+      accounts: process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
+    }
   },
   mocha: {
     timeout: 40000
