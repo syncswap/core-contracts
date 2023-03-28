@@ -69,7 +69,7 @@ export async function deployContract(
         constructorArguments, {
             ...overrides,
             //feeToken: FEE_TOKEN,
-            gasLimit: '160000000',
+            gasLimit: '200000000',
         },
         additionalFactoryDeps
     );

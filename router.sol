@@ -4,6 +4,8 @@
 //  ____/ \_, | _| _| \__| ____/  \_/\_/ \__,_| .__/ 
 //        ___/                                 _|    
 //
+// SyncSwap is a decentralized exchange on Ethereum L2 Rollups.
+//
 // API Documentation
 // https://syncswap.gitbook.io/api-documentation/
 

@@ -41,6 +41,10 @@
   "scripts": {
     "build": "yarn hardhat compile",
     "build-zk": "yarn hardhat compile --network zkSyncTestnet",
+    "deploy-fee-manager-zksync-testnet": "yarn hardhat deploy-zksync --script deployFeeManagerTestnet.ts --network zkSyncTestnet",
+    "deploy-fee-manager-zksync-mainnet": "yarn hardhat deploy-zksync --script deployFeeManagerMainnet.ts --network zkSyncMainnet",
+    "deploy-fee-recipient-zksync-testnet": "yarn hardhat deploy-zksync --script deployFeeRecipientTestnet.ts --network zkSyncTestnet",
+    "deploy-fee-recipient-zksync-mainnet": "yarn hardhat deploy-zksync --script deployFeeRecipientMainnet.ts --network zkSyncMainnet",
     "deploy-zksync-testnet": "yarn hardhat deploy-zksync --script deployTestnet.ts --network zkSyncTestnet",
     "deploy-zksync-mainnet": "yarn hardhat deploy-zksync --script deployMainnet.ts --network zkSyncMainnet",
     "deploy-scroll-testnet": "yarn hardhat run --network scrollTestnet deploy/deployScrollTestnet.ts",

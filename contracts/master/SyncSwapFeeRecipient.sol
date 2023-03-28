@@ -13,7 +13,7 @@ error InvalidFeeSender();
 
 contract SyncSwapFeeRecipient is IFeeRecipient, Ownable2Step {
 
-    uint public constant EPOCH_DURATION = 7 days;
+    uint public epochDuration = 3 days;
 
     /// @dev The registry for fee senders.
     address public feeRegistry;
@@ -30,10 +30,22 @@ contract SyncSwapFeeRecipient is IFeeRecipient, Ownable2Step {
     /// @dev The fee distributors.
     address[] public feeDistributors; // for inspection only
 
+    struct FeeTokenData {
+        // The start time of a fee token from a sender.
+        uint startTime;
+
+        // The accumulated fee amount since start time.
+        uint amount;
+    }
+
+    /// @dev The fee token data of a sender.
+    mapping(address => mapping(address => FeeTokenData)) public feeTokenData; // sender => token => time
+
     event NotifyFees(address indexed sender, uint16 indexed feeType, address indexed token, uint amount, uint feeRate);
     event AddFeeDistributor(address indexed distributor);
     event RemoveFeeDistributor(address indexed distributor);
     event SetFeeRegistry(address indexed feeRegistry);
+    event SetEpochDuration(uint epochDuration);
 
     constructor(address _feeRegistry) {
         feeRegistry = _feeRegistry;
@@ -47,8 +59,8 @@ contract SyncSwapFeeRecipient is IFeeRecipient, Ownable2Step {
         return feeDistributors.length;
     }
 
-    function getEpochStart(uint ts) public pure returns (uint) {
-        return ts - (ts % EPOCH_DURATION);
+    function getEpochStart(uint ts) public view returns (uint) {
+        return ts - (ts % epochDuration);
     }
 
     /// @dev Notifies the fee recipient after sent fees.
@@ -66,14 +78,28 @@ contract SyncSwapFeeRecipient is IFeeRecipient, Ownable2Step {
         uint epoch = getEpochStart(block.timestamp);
         uint epochTokenFees = fees[epoch][token];
 
-        // Pushes new tokens to array.
-        if (epochTokenFees == 0) {
-            feeTokens[epoch].push(token);
-        }
+        // Unchecked to avoid potential overflow, since fees are only for inspection.
+        unchecked {
+            if (epochTokenFees == 0) {
+                // Pushes new tokens to array.
+                feeTokens[epoch].push(token);
 
-        // Updates epoch fees for the token.
-        epochTokenFees += amount;
-        fees[epoch][token] = epochTokenFees;
+                // Updates epoch fees for the token.
+                fees[epoch][token] = amount;
+
+                // Updates fee token data for sender.
+                feeTokenData[msg.sender][token] = FeeTokenData({
+                    startTime: block.timestamp,
+                    amount: amount
+                });
+            } else {
+                // Updates epoch fees for the token.
+                fees[epoch][token] = (epochTokenFees + amount);
+
+                // Updates fee token data for sender.
+                feeTokenData[msg.sender][token].amount += amount;
+            }
+        }
 
         emit NotifyFees(msg.sender, feeType, token, amount, feeRate);
     }
@@ -144,6 +170,12 @@ contract SyncSwapFeeRecipient is IFeeRecipient, Ownable2Step {
         require(_feeRegistry != address(0), "Invalid address");
         feeRegistry = _feeRegistry;
         emit SetFeeRegistry(_feeRegistry);
+    }
+
+    function setEpochDuration(uint _epochDuration) external onlyOwner {
+        require(_epochDuration != 0, "Invalid duration");
+        epochDuration = _epochDuration;
+        emit SetEpochDuration(_epochDuration);
     }
 
     function withdrawERC20(address token, address to, uint amount) external onlyOwner {
