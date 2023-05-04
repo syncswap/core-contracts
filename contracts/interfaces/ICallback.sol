@@ -2,6 +2,9 @@
 
 pragma solidity >=0.5.0;
 
+/// @dev The callback interface for SyncSwap base pool operations.
+/// Note additional checks will be required for some callbacks, see below for more information.
+/// Visit the documentation https://syncswap.gitbook.io/api-documentation/ for more details.
 interface ICallback {
 
     struct BaseMintCallbackParams {
@@ -56,6 +59,9 @@ interface ICallback {
         uint8 withdrawMode;
         bytes callbackData;
     }
+    /// @dev Note the `tokenOut` parameter can be decided by the caller, and the correctness is not guaranteed.
+    /// Additional checks MUST be performed in callback to ensure the `tokenOut` is one of the pools tokens if the sender
+    /// is not a trusted source to avoid potential issues.
     function syncSwapBaseBurnSingleCallback(BaseBurnSingleCallbackParams calldata params) external;
 
     struct BaseSwapCallbackParams {
@@ -74,5 +80,8 @@ interface ICallback {
         uint8 withdrawMode;
         bytes callbackData;
     }
+    /// @dev Note the `tokenIn` parameter can be decided by the caller, and the correctness is not guaranteed.
+    /// Additional checks MUST be performed in callback to ensure the `tokenIn` is one of the pools tokens if the sender
+    /// is not a trusted source to avoid potential issues.
     function syncSwapBaseSwapCallback(BaseSwapCallbackParams calldata params) external;
 }

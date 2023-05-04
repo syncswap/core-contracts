@@ -289,6 +289,9 @@ contract SyncSwapClassicPool is IClassicPool, ERC20Permit2, ReentrancyGuard {
             params.sender = _sender;
             params.callbackData = _callbackData;
 
+            /// @dev Note the `tokenOut` parameter can be decided by the caller, and the correctness is not guaranteed.
+            /// Additional checks MUST be performed in callback to ensure the `tokenOut` is one of the pools tokens if the sender
+            /// is not a trusted source to avoid potential issues.
             ICallback(_callback).syncSwapBaseBurnSingleCallback(params);
         }
 
@@ -361,6 +364,9 @@ contract SyncSwapClassicPool is IClassicPool, ERC20Permit2, ReentrancyGuard {
             params.sender = _sender;
             params.callbackData = _callbackData;
 
+            /// @dev Note the `tokenIn` parameter can be decided by the caller, and the correctness is not guaranteed.
+            /// Additional checks MUST be performed in callback to ensure the `tokenIn` is one of the pools tokens if the sender
+            /// is not a trusted source to avoid potential issues.
             ICallback(_callback).syncSwapBaseSwapCallback(params);
         }
 
