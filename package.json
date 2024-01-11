@@ -10,7 +10,8 @@
   "keywords": [
     "syncswap",
     "zksync",
-    "ethereum"
+    "ethereum",
+    "newkeyword"
   ],
   "license": "AGPL-3.0-or-later",
   "devDependencies": {
