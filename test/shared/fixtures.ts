@@ -213,10 +213,10 @@ export async function routerFixture(): Promise<V2Fixture> {
     const stableFactory = await deployStablePoolFactory(master);
 
     // deploy routers
-    const router = await deployRouter(classicFactory.address, WETH.address);
+    const router = await deployRouter(vault.address, WETH.address);
 
     // event emitter for testing
-    const routerEventEmitter = await deployRouterEventEmitter(classicFactory.address, WETH.address);
+    const routerEventEmitter = await deployRouterEventEmitter(vault.address, WETH.address);
 
     const data = defaultAbiCoder.encode(
         ["address", "address"], [tokenA.address, tokenB.address]
