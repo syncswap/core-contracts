@@ -213,23 +213,26 @@ export async function routerFixture(): Promise<V2Fixture> {
     const stableFactory = await deployStablePoolFactory(master);
 
     // deploy routers
-    const router = await deployRouter(classicFactory.address, WETH.address);
+    const router = await deployRouter(vault.address, WETH.address);
 
     // event emitter for testing
-    const routerEventEmitter = await deployRouterEventEmitter(classicFactory.address, WETH.address);
+    const routerEventEmitter = await deployRouterEventEmitter(vault.address, WETH.address);
 
     const data = defaultAbiCoder.encode(
         ["address", "address"], [tokenA.address, tokenB.address]
     );
-    await classicFactory.createPool(data);
-    const pairAddress = await classicFactory.getPool(tokenA.address, tokenB.address, false);
-    const pairArtifact = await hre.artifacts.readArtifact('SyncSwapPool');;
+    await master.createPool(classicFactory.address, data);
+    const pairAddress = await classicFactory.getPool(tokenA.address, tokenB.address);
+    const pairArtifact = await hre.artifacts.readArtifact('SyncSwapClassicPool');
     const pair = new Contract(pairAddress, pairArtifact.abi, ethers.provider).connect(wallet);
 
     const [token0, token1] = Number(tokenA.address) < Number(tokenB.address) ? [tokenA, tokenB] : [tokenB, tokenA];
 
-    await classicFactory.createPool(data);
-    const WETHPairAddress = await classicFactory.getPool(WETH.address, WETHPartner.address, false);
+    const WETHData = defaultAbiCoder.encode(
+        ["address", "address"], [WETH.address, WETHPartner.address]
+    );
+    await master.createPool(classicFactory.address, WETHData);
+    const WETHPairAddress = await classicFactory.getPool(WETH.address, WETHPartner.address);
     const WETHPair = new Contract(WETHPairAddress, pairArtifact.abi, ethers.provider).connect(wallet);
 
     return {
